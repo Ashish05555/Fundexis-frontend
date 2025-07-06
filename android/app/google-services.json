@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "758832599619",
+    "project_id": "fundexis-ea0b5",
+    "storage_bucket": "fundexis-ea0b5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:758832599619:android:fa6cf4c768c6aa5a367af6",
+        "android_client_info": {
+          "package_name": "com.anonymous.FundexisFrontend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB__aEKdblppo0X4FtkZSV6HJCZc1dn_yA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
