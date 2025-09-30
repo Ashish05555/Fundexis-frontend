@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:5000';
+const BASE_URL = 'https://fundexis-backend-758832599619.us-central1.run.app';
 
 export async function searchInstruments(query) {
   try {

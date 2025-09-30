@@ -1,120 +1,182 @@
-import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+import React, { useLayoutEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+} from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
+import { useLivePrice } from "../context/LivePriceProvider";
+import { useTheme } from "../context/ThemeContext";
+import { Ionicons } from "@expo/vector-icons";
+
+// Market hours helper
+function isMarketClosed() {
+  const now = new Date();
+  const day = now.getDay();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const isOpen =
+    day >= 1 &&
+    day <= 5 &&
+    ((hour > 9 || (hour === 9 && minute >= 15)) &&
+      (hour < 15 || (hour === 15 && minute < 30)));
+  return !isOpen;
+}
 
 export default function InstrumentDetailScreen({ route, navigation }) {
-  const { instrument } = route.params;
+  const { theme } = useTheme();
+  const { instrument } = route.params || {};
+  const instrumentToken = (instrument?.instrument_token || instrument?.token || "").toString();
+  const exchange = instrument?.exchange || "NSE";
+  const tradingsymbol = instrument?.tradingsymbol;
 
-  // Dummy data for illustration (replace with real data from your API/instrument object)
-  const {
-    tradingsymbol = "CDSL25JUN1700CE",
-    name = "CDSL 26 Jun 1700 Call",
-    oi = 1087,
-    change_in_oi = -14,
-    open = 10.15,
-    high = 22.4,
-    low = 7.1,
-    close = 10.2,
-    last_price = 20.6,
-    tot_buy_qty = 114450,
-    tot_sell_qty = 45500,
-    volume = 0,
-    change = 10.4,
-    change_pct = 101.96
-  } = instrument;
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: "Instrument Details",
+      headerBackVisible: false,
+      headerLeft: () => null,
+    });
+  }, [navigation]);
+
+  // LIVE PRICE - use context and refresh subscription on focus
+  const livePrice = useLivePrice(instrumentToken);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      // Focus triggers subscription in useLivePrice
+      return () => {
+        // Unsubscribe handled by useLivePrice on unfocus/unmount
+      };
+    }, [instrumentToken])
+  );
+
+  // Determine the live price
+  const marketClosed = isMarketClosed();
+  let lastPrice;
+  if (marketClosed) {
+    lastPrice = instrument?.close ?? instrument?.last_price ?? "—";
+  } else {
+    lastPrice =
+      typeof livePrice === "number" && livePrice !== 0
+        ? livePrice
+        : instrument?.last_price ?? instrument?.close ?? "—";
+  }
+
+  if (!instrument || !instrumentToken) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <Text style={[styles.error, { color: theme.error }]}>
+          Instrument data not found.
+        </Text>
+      </View>
+    );
+  }
+
+  // Show error only if market is open and no price is available
+  const showNoLivePriceWarning =
+    !marketClosed &&
+    (lastPrice === "—" || lastPrice === undefined || lastPrice === null);
+
+  const handleBackToSearch = () => {
+    const p = route.params || {};
+    const searchQuery = p.searchQuery || p.searchText || "";
+    const parent = p.searchStackParent;
+    const screen = p.searchScreenName;
+    const extra = p.searchScreenParams || {};
+
+    if (parent && screen) {
+      navigation.navigate(parent, {
+        screen,
+        params: { ...extra, searchQuery, reopenSearch: true },
+      });
+      return;
+    }
+    if (screen) {
+      navigation.navigate(screen, { ...extra, searchQuery, reopenSearch: true });
+      return;
+    }
+    if (navigation.canGoBack()) navigation.goBack();
+  };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{paddingBottom: 30}}>
-      {/* Title */}
-      <Text style={styles.title}>{name}</Text>
-      <Text style={styles.symbol}>{tradingsymbol}</Text>
+    <ScrollView
+      style={[styles.container, { backgroundColor: theme.background }]}
+      contentContainerStyle={{ paddingBottom: 30 }}
+    >
+      <View style={styles.titleRow}>
+        <TouchableOpacity onPress={handleBackToSearch} style={styles.blueBackBtn}>
+          <Ionicons name="arrow-back" size={22} color={theme.brand} />
+        </TouchableOpacity>
+        <Text style={[styles.title, { color: theme.brand }]}>{tradingsymbol}</Text>
+        <Text style={[styles.exchange, { color: theme.textSecondary }]}>
+          ({exchange})
+        </Text>
+      </View>
 
-      {/* Buy/Sell Buttons */}
-      <View style={styles.buttonRow}>
+      <View style={styles.livePriceContainer}>
+        <Text style={[styles.livePriceLabel, { color: theme.textSecondary }]}>
+          {marketClosed ? "Last Price" : "Live Price"}
+        </Text>
+        {lastPrice === "—" || lastPrice === undefined || lastPrice === null ? (
+          <ActivityIndicator size="small" color={theme.brand} />
+        ) : (
+          <Text style={[styles.livePriceValue, { color: theme.brand }]}>
+            {`₹${lastPrice}`}
+          </Text>
+        )}
+        {showNoLivePriceWarning && (
+          <Text style={{ color: theme.error, fontSize: 12, marginTop: 6 }}>
+            Unable to fetch live price. Check network, token, or backend.
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.buySellRow}>
         <TouchableOpacity
-          style={[styles.actionButton, { backgroundColor: "#2196f3" }]}
-          onPress={() => navigation.navigate("OrderScreen", { instrument, side: "BUY" })}
+          style={[styles.buyButton, { backgroundColor: theme.brand }]}
+          onPress={() =>
+            navigation.navigate("OrderScreen", {
+              instrument: { ...instrument, last_price: lastPrice },
+              side: "BUY",
+            })
+          }
         >
-          <Text style={styles.actionButtonText}>Buy</Text>
+          <Text style={styles.buyText}>Buy</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.actionButton, { backgroundColor: "#e53935" }]}
-          onPress={() => navigation.navigate("OrderScreen", { instrument, side: "SELL" })}
+          style={[styles.sellButton, { backgroundColor: theme.error }]}
+          onPress={() =>
+            navigation.navigate("OrderScreen", {
+              instrument: { ...instrument, last_price: lastPrice },
+              side: "SELL",
+            })
+          }
         >
-          <Text style={styles.actionButtonText}>Sell</Text>
+          <Text style={styles.sellText}>Sell</Text>
         </TouchableOpacity>
       </View>
 
-      {/* OI & Change in OI */}
-      <View style={styles.oiRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.oiLabel}>OI</Text>
-          <Text style={styles.oiValue}>{oi}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.oiLabel}>Change in OI</Text>
-          <Text style={styles.oiValue}>{change_in_oi}</Text>
-        </View>
-      </View>
-
-      {/* Price Info */}
-      <View style={styles.priceStatsRow}>
-        <View style={styles.priceStat}>
-          <Text style={styles.priceStatLabel}>Open</Text>
-          <Text style={styles.priceStatValue}>{open}</Text>
-        </View>
-        <View style={styles.priceStat}>
-          <Text style={styles.priceStatLabel}>High</Text>
-          <Text style={styles.priceStatValue}>{high}</Text>
-        </View>
-        <View style={styles.priceStat}>
-          <Text style={styles.priceStatLabel}>Low</Text>
-          <Text style={styles.priceStatValue}>{low}</Text>
-        </View>
-        <View style={styles.priceStat}>
-          <Text style={styles.priceStatLabel}>Close</Text>
-          <Text style={styles.priceStatValue}>{close}</Text>
-        </View>
-      </View>
-
-      <View style={styles.divider} />
-
-      {/* Last Price, Tot Buy Qty, Tot Sell Qty, Volume, Change, Change Pct */}
-      <View style={styles.statsRow}>
-        <View style={styles.statsBlock}>
-          <Text style={styles.statsLabel}>Last Price</Text>
-          <Text style={[styles.statsValue, { color: "#389e3c" }]}>{last_price}</Text>
-        </View>
-        <View style={styles.statsBlock}>
-          <Text style={styles.statsLabel}>Tot Buy Qty</Text>
-          <Text style={styles.statsValue}>{tot_buy_qty}</Text>
-        </View>
-        <View style={styles.statsBlock}>
-          <Text style={styles.statsLabel}>Tot. Sell Qty</Text>
-          <Text style={styles.statsValue}>{tot_sell_qty}</Text>
-        </View>
-      </View>
-      <View style={styles.statsRow}>
-        <View style={styles.statsBlock}>
-          <Text style={styles.statsLabel}>Volume</Text>
-          <Text style={styles.statsValue}>{volume}</Text>
-        </View>
-        <View style={styles.statsBlock}>
-          <Text style={styles.statsLabel}>Change</Text>
-          <Text style={[styles.statsValue, { color: "#389e3c" }]}>{change}</Text>
-        </View>
-        <View style={styles.statsBlock}>
-          <Text style={styles.statsLabel}>Change Pct%</Text>
-          <Text style={[styles.statsValue, { color: "#389e3c" }]}>{change_pct}%</Text>
-        </View>
-      </View>
-
-      {/* Option Chain & Futures Buttons */}
-      <View style={styles.chainRow}>
-        <TouchableOpacity style={styles.chainButton}>
-          <Text style={styles.chainButtonText}>Option Chain</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.chainButton}>
-          <Text style={styles.chainButtonText}>Futures</Text>
+      <View style={styles.gttRow}>
+        <TouchableOpacity
+          style={[styles.gttButton, { backgroundColor: theme.brand }]}
+          onPress={() =>
+            navigation.navigate("GttOrdersScreen", {
+              instrument: { ...instrument, last_price: lastPrice },
+              source: "InstrumentDetail",
+            })
+          }
+          activeOpacity={0.85}
+        >
+          <Ionicons
+            name="time-outline"
+            size={18}
+            color="#fff"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.gttText}>Create GTT</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -122,72 +184,55 @@ export default function InstrumentDetailScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff", padding: 18 },
-  title: { fontSize: 22, fontWeight: "bold", marginBottom: 2, color: "#222" },
-  symbol: { fontSize: 15, color: "#888", marginBottom: 22, fontWeight: "600" },
-  buttonRow: {
+  container: { flex: 1, padding: 18 },
+  error: { fontSize: 18, marginTop: 40, textAlign: "center" },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 10,
+  },
+  blueBackBtn: {
+    paddingVertical: 2,
+    paddingRight: 2,
+  },
+  title: { fontSize: 22, fontWeight: "bold", marginBottom: 2 },
+  exchange: { fontSize: 14, fontWeight: "600", marginBottom: 0 },
+  livePriceContainer: { alignItems: "center", marginBottom: 10 },
+  livePriceLabel: { fontSize: 13 },
+  livePriceValue: { fontSize: 22, fontWeight: "bold", marginTop: 2 },
+  buySellRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 18,
+    marginBottom: 12,
+    marginTop: 10,
+    gap: 12,
   },
-  actionButton: {
-    flex: 0.48,
-    height: 48,
+  buyButton: {
+    flex: 1,
+    marginRight: 4,
+    borderRadius: 6,
+    alignItems: "center",
+    padding: 16,
+  },
+  sellButton: {
+    flex: 1,
+    marginLeft: 4,
+    borderRadius: 6,
+    alignItems: "center",
+    padding: 16,
+  },
+  buyText: { color: "#fff", fontWeight: "bold", fontSize: 18 },
+  sellText: { color: "#fff", fontWeight: "bold", fontSize: 18 },
+  gttRow: {
+    marginTop: 6,
+  },
+  gttButton: {
     borderRadius: 6,
     alignItems: "center",
     justifyContent: "center",
-    elevation: 2,
-  },
-  actionButtonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-    letterSpacing: 0.5,
-  },
-  oiRow: {
+    paddingVertical: 14,
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 18,
   },
-  oiLabel: {
-    color: "#777",
-    fontSize: 15,
-    marginBottom: 2,
-  },
-  oiValue: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#222",
-  },
-  priceStatsRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 14 },
-  priceStat: { flex: 1, alignItems: "center" },
-  priceStatLabel: { fontSize: 13, color: "#888" },
-  priceStatValue: { fontSize: 15, fontWeight: "bold", color: "#444" },
-  divider: {
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
-    marginVertical: 18,
-  },
-  statsRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
-  statsBlock: { flex: 1, alignItems: "center" },
-  statsLabel: { fontSize: 13, color: "#888" },
-  statsValue: { fontSize: 15, fontWeight: "bold", color: "#444" },
-  chainRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 26,
-  },
-  chainButton: {
-    flex: 0.47,
-    backgroundColor: "#3949ab",
-    borderRadius: 6,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  chainButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-    letterSpacing: 0.5,
-  },
+  gttText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
 });

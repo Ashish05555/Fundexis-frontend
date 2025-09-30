@@ -1,0 +1,169 @@
+.cancelled-card {
+  background: #fff;
+  border-radius: 13px;
+  box-shadow: 0 2px 10px rgba(44, 62, 80, 0.03);
+  padding: 13px 18px 11px 18px;
+  margin-bottom: 14px;
+  width: 100%;
+  max-width: 370px;
+  box-sizing: border-box;
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  /* Neutral grey, same as executed card */
+  border: 2px solid #8a97ab;
+  transition: border-color 0.18s;
+}
+
+.cancelled-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 0;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 0;
+}
+
+.cancelled-left-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cancelled-row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cancelled-row + .cancelled-row {
+  margin-top: 9px;
+}
+
+.badge {
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 2px 13px;
+  letter-spacing: 0.2px;
+  display: inline-block;
+  border: 1.5px solid transparent;
+  margin: 0;
+}
+
+.badge-type.buy {
+  background: #eaf4ff;
+  color: #1976d2;
+}
+
+.badge-type.sell {
+  background: #ffeaea;
+  color: #e53935;
+}
+
+/* Make the CANCELLED badge have a visible red border, regardless of global styles */
+.cancelled-card .badge.badge-status-cancelled {
+  background: #fff6f6;
+  color: #e53935;
+  border: 1.8px solid #e53935 !important;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 3px 16px;
+  border-radius: 6px;
+  min-width: 88px;
+  text-align: center;
+  letter-spacing: 0.1px;
+}
+
+.badge-amo {
+  background: #ffe5b1;
+  color: #c97b11;
+  border-radius: 5px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 13px;
+  letter-spacing: 0.3px;
+  margin-right: 0;
+}
+
+.cancelled-qty {
+  font-size: 15px;
+  font-weight: 500;
+  color: #222;
+}
+
+.cancelled-instrument {
+  font-size: 18px;
+  font-weight: 600;
+  color: #222;
+  letter-spacing: 0.2px;
+}
+
+.avg-label {
+  font-size: 15px;
+  color: #888;
+  font-weight: 500;
+}
+
+.avg-value {
+  font-size: 17px;
+  color: #1976d2;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.cancelled-exchange {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 44px;
+  color: #888;
+  background: none;
+  border: none;
+}
+
+.product-order-right {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.product-type.mis {
+  background: #eaf4ff;
+  color: #1976d2;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.product-type.nrml {
+  background: #f8f4ff;
+  color: #8e44ad;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.order-type.market {
+  background: #eaf5ea;
+  color: #22b573;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.order-type.limit {
+  background: #fffbe9;
+  color: #f5a623;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.no-data {
+  color: #888;
+  font-size: 16px;
+  font-weight: 500;
+}

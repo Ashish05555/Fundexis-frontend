@@ -20,9 +20,9 @@ react {
 def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInReleaseBuilds') ?: false).toBoolean()
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+// ------------------- FLAVOR FIX FOR IAP -------------------
 android {
     ndkVersion rootProject.ext.ndkVersion
-
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdkVersion rootProject.ext.compileSdkVersion
 
@@ -37,6 +37,19 @@ android {
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
         buildConfigField "boolean", "IS_HERMES_ENABLED", "false"
     }
+
+    // --- Declare ONLY the play flavor to avoid IAP ambiguity
+    flavorDimensions "store"
+    productFlavors {
+        play {
+            dimension "store"
+        }
+        // Remove or comment out amazon flavor if you don't need it
+        // amazon {
+        //     dimension "store"
+        // }
+    }
+
     signingConfigs {
         debug {
             storeFile file('debug.keystore')

@@ -1,97 +1,215 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from "react-native";
-import auth from "@react-native-firebase/auth";
-import firestore from "@react-native-firebase/firestore";
+import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, Pressable } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { auth, db } from "../firebase";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 export default function SignUpScreen({ navigation, setUser }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
+  const [popupVisible, setPopupVisible] = useState(false);
+  const [popupMessage, setPopupMessage] = useState("");
 
-  const handleSignUp = async () => {
-    if (!name || !email || !password || !confirm) {
-      Alert.alert("All fields are required!");
-      return;
-    }
-    if (password !== confirm) {
-      Alert.alert("Passwords do not match!");
-      return;
-    }
+  function showPopup(message) {
+    setPopupMessage(message);
+    setPopupVisible(true);
+    setTimeout(() => setPopupVisible(false), 2500);
+  }
+
+  const handleGoogleSignUp = async () => {
     try {
-      // Create user in Firebase Auth
-      const userCredential = await auth().createUserWithEmailAndPassword(email, password);
-
-      // Save user profile in Firestore
-      await firestore().collection("users").doc(userCredential.user.uid).set({
-        name,
-        email,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      });
-
-      setUser({ uid: userCredential.user.uid, name, email });
-      navigation.replace("MainTabs");
-    } catch (error) {
-      if (error.code === "auth/email-already-in-use") {
-        Alert.alert("That email address is already in use!");
-      } else if (error.code === "auth/invalid-email") {
-        Alert.alert("That email address is invalid!");
-      } else if (error.code === "auth/weak-password") {
-        Alert.alert("Password should be at least 6 characters.");
-      } else {
-        Alert.alert("Sign up failed!", error.message);
+      const provider = new GoogleAuthProvider();
+      const userCredential = await signInWithPopup(auth, provider);
+      const userDocRef = doc(db, "users", userCredential.user.uid);
+      let userDoc = await getDoc(userDocRef);
+      if (!userDoc.exists()) {
+        await setDoc(userDocRef, {
+          email: userCredential.user.email,
+          name: userCredential.user.displayName,
+          provider: "google",
+          createdAt: new Date(),
+        });
+        userDoc = await getDoc(userDocRef);
       }
+      const userData = userDoc.data();
+      setUser({ uid: userCredential.user.uid, ...userData });
+      showPopup("Signed up with Google!");
+      setTimeout(() => navigation.replace("MainTabs"), 900);
+    } catch (err) {
+      showPopup("Google sign-up failed: " + err.message);
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Create Account</Text>
-      <TextInput style={styles.input} placeholder="Full Name" value={name} onChangeText={setName} />
-      <TextInput
-        style={styles.input}
-        placeholder="Email Address"
-        keyboardType="email-address"
-        autoCapitalize="none"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Confirm Password"
-        secureTextEntry
-        value={confirm}
-        onChangeText={setConfirm}
-      />
-      <TouchableOpacity style={styles.signUpBtn} onPress={handleSignUp}>
-        <Text style={styles.signUpBtnText}>Sign Up</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate("SignIn")}>
-        <Text style={styles.switchText}>
-          Already have an account? <Text style={{ color: "#007AFF" }}>Sign In</Text>
-        </Text>
-      </TouchableOpacity>
+      <Modal
+        visible={popupVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPopupVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setPopupVisible(false)}>
+          <View style={styles.popupBox}>
+            <Text style={styles.popupText}>{popupMessage}</Text>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <View style={styles.innerContainer}>
+        <View style={styles.logoWrapper}>
+          <Image source={require("../assets/app-icon.png")} style={styles.logoImg} resizeMode="contain" />
+          <Text style={styles.glowAppName}>FUNDEXIS</Text>
+        </View>
+
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.googleBtn}
+            activeOpacity={0.85}
+            onPress={handleGoogleSignUp}
+          >
+            <Ionicons name="logo-google" size={24} color="#007AFF" style={{ marginRight: 10 }} />
+            <Text style={styles.googleBtnText}>Sign Up with Google</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity onPress={() => navigation.replace("SignIn")}>
+          <Text style={styles.switchText}>
+            <Text style={styles.switchLabel}>Already have an account? </Text>
+            <Text style={styles.switchLink}>Sign In</Text>
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
+// --- Theme Colors ---
+const BLUE = "#007AFF";
+const BACKGROUND = "#007AFF";
+const WHITE = "#fff";
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7faff", padding: 24, justifyContent: "center" },
-  header: { fontSize: 28, fontWeight: "bold", color: "#007AFF", marginBottom: 36, alignSelf: "center" },
-  input: {
-    borderWidth: 1, borderColor: "#ddd", borderRadius: 7, padding: 14,
-    fontSize: 16, marginBottom: 18, backgroundColor: "#fff"
+  container: {
+    flex: 1,
+    backgroundColor: BACKGROUND,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "100%",
   },
-  signUpBtn: {
-    backgroundColor: "#007AFF", paddingVertical: 14, borderRadius: 8, alignItems: "center", marginBottom: 12
+  innerContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    marginTop: -30,
   },
-  signUpBtnText: { color: "#fff", fontWeight: "700", fontSize: 17 },
-  switchText: { color: "#555", textAlign: "center", marginTop: 16, fontSize: 15 }
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(40,40,40,0.18)",
+  },
+  popupBox: {
+    backgroundColor: "#fff",
+    paddingVertical: 20,
+    paddingHorizontal: 30,
+    borderRadius: 13,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.23,
+    shadowRadius: 13,
+    alignItems: "center",
+    minWidth: 200,
+    maxWidth: 300,
+  },
+  popupText: {
+    fontSize: 16,
+    color: BLUE,
+    textAlign: "center",
+    fontWeight: "600",
+    marginBottom: 12,
+  },
+  logoWrapper: {
+    alignItems: "center",
+    marginBottom: 25,
+    marginTop: 0,
+    width: "100%",
+  },
+  logoImg: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: WHITE,
+    marginBottom: 10,
+    shadowColor: BLUE,
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.13,
+    shadowRadius: 30,
+    elevation: 12,
+  },
+  glowAppName: {
+    fontSize: 34,
+    fontWeight: "bold",
+    color: WHITE,
+    letterSpacing: 2,
+    marginBottom: 4,
+    textTransform: "uppercase",
+    textAlign: "center",
+    textShadowColor: "#4fc3f7",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 12,
+  },
+  card: {
+    backgroundColor: "transparent",
+    borderRadius: 18,
+    width: "100%",
+    alignItems: "center",
+    marginBottom: 24,
+    marginTop: 10,
+    borderWidth: 0,
+  },
+  googleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: WHITE,
+    borderRadius: 25,
+    paddingVertical: 18,
+    paddingHorizontal: 32,
+    marginBottom: 2,
+    elevation: 2,
+    minWidth: 250,
+    maxWidth: 320,
+    justifyContent: "center",
+    shadowColor: "#007AFF",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 2,
+    borderColor: "#e3f2fd",
+  },
+  googleBtnText: {
+    color: BLUE,
+    fontWeight: "700",
+    fontSize: 20,
+    textAlign: "center",
+    letterSpacing: 0.5,
+  },
+  switchText: {
+    color: WHITE,
+    textAlign: "center",
+    fontSize: 16,
+    marginBottom: 12,
+    fontWeight: "500",
+    marginTop: 10,
+  },
+  switchLabel: {
+    color: WHITE,
+  },
+  switchLink: {
+    color: WHITE,
+    fontWeight: "bold",
+    fontSize: 16,
+    textDecorationLine: "underline",
+    backgroundColor: "transparent",
+    paddingLeft: 2,
+  },
 });

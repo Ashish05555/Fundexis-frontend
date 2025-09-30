@@ -1,0 +1,239 @@
+.open-card {
+  background: #fff;
+  border-radius: 13px;
+  box-shadow: 0 2px 10px rgba(44, 62, 80, 0.03);
+  padding: 13px 18px 11px 18px;
+  margin-bottom: 14px;
+  width: 100%;
+  max-width: 370px;
+  box-sizing: border-box;
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  border: 2px solid #8a97ab; /* Same as executed/cancelled card */
+  transition: border-color 0.18s;
+}
+
+/* Row spacing, alignment */
+.open-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 0;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 0;
+}
+
+.open-row-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.open-row-right {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Spacing between rows */
+.open-row + .open-row {
+  margin-top: 9px;
+}
+
+.badge {
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 2px 13px;
+  letter-spacing: 0.2px;
+  display: inline-block;
+  border: 1.5px solid transparent;
+  margin: 0;
+}
+
+.badge-type.buy {
+  background: #eaf4ff;
+  color: #1976d2;
+}
+
+.badge-type.sell {
+  background: #ffeaea;
+  color: #e53935;
+}
+
+/* Always show a clear blue border for OPEN/SCHEDULED (or any status shown on Open card) */
+.open-card .badge.badge-status-open {
+  background: #f6faff;
+  color: #1976d2;
+  border: 1.8px solid #1976d2 !important; /* ensure the badge has a visible boundary */
+  font-size: 15px;
+  font-weight: 700;
+  padding: 3px 16px;
+  border-radius: 6px;
+  min-width: 88px;
+  text-align: center;
+  letter-spacing: 0.1px;
+}
+
+.badge-amo {
+  background: #ffe5b1;
+  color: #c97b11;
+  border-radius: 5px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 13px;
+  letter-spacing: 0.3px;
+}
+
+.open-qty {
+  font-size: 15px;
+  font-weight: 500;
+  color: #222;
+}
+
+.open-instrument {
+  font-size: 18px;
+  font-weight: 600;
+  color: #222;
+  letter-spacing: 0.2px;
+}
+
+.avg-label {
+  font-size: 15px;
+  color: #888;
+  font-weight: 500;
+}
+
+.avg-value {
+  font-size: 17px;
+  color: #1976d2;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.open-exchange {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 44px;
+  background: none;
+  border: none;
+}
+
+.product-order-right {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.product-type.mis {
+  background: #eaf4ff;
+  color: #1976d2;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.product-type.nrml {
+  background: #f8f4ff;
+  color: #8e44ad;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.order-type.market {
+  background: #eaf5ea;
+  color: #22b573;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.order-type.limit {
+  background: #fffbe9;
+  color: #f5a623;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.no-data {
+  color: #888;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* Modal Styles */
+.open-modal-overlay {
+  position: fixed;
+  z-index: 99999; /* ensure over everything in the app */
+  inset: 0;
+  background: rgba(44,62,80,0.12);
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+}
+
+/* Make modal a bit larger (wider and taller feeling) */
+.open-modal {
+  width: calc(100% - 12px);              /* nearly edge-to-edge on mobile */
+  max-width: 560px;                       /* allow more width on larger screens */
+  border-radius: 18px 18px 0 0;           /* slightly larger radius */
+  background: #fff;
+  box-shadow: 0 -2px 16px rgba(44, 62, 80, 0.13);
+  padding: 38px 22px 30px 22px;           /* more padding for breathing room */
+  margin-bottom: 0;
+  min-height: 180px;                      /* feel a bit taller than before */
+}
+
+.open-modal-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.open-modal-header {
+  font-size: 20px;                        /* slightly larger title */
+  font-weight: 700;
+  color: #222;
+  margin-bottom: 28px;
+}
+
+.open-modal-actions {
+  display: flex;
+  width: 100%;
+  gap: 24px;                              /* a tad more spacing */
+  justify-content: space-between;
+}
+
+.open-modify-btn {
+  background: #1976d2;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 14px 0;                        /* slightly larger buttons */
+  width: 48%;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px #1976d229;
+  transition: background 0.17s;
+}
+
+.open-cancel-btn {
+  background: #e53935;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 14px 0;                        /* slightly larger buttons */
+  width: 48%;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px #e5393529;
+  transition: background 0.17s;
+}

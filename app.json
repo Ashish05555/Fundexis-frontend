@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "FundexisFrontend",
+    "name": "Fundexis",
     "slug": "FundexisFrontend",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,7 +8,6 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -30,6 +29,9 @@
       "eas": {
         "projectId": "ac9810ec-cce0-4715-aa9c-63b7e8627faa"
       }
-    }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }

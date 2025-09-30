@@ -1,30 +1,46 @@
-import React, { useState } from "react";
-import { View, FlatList, TouchableOpacity, Text, Modal, Button } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, FlatList, TouchableOpacity, Text, Modal, Button, ActivityIndicator } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-
-// Example/mock data (replace with your actual search/list data)
-const mockInstruments = [
-  { instrument_token: 1, tradingsymbol: "CDSL25JUN1700CE", name: "CDSL 26 Jun 1700 Call", last_price: 20.60 },
-  { instrument_token: 2, tradingsymbol: "TCS", name: "Tata Consultancy", last_price: 3931.20 },
-  { instrument_token: 3, tradingsymbol: "RELIANCE", name: "Reliance Industries Ltd", last_price: 3145.25 },
-];
+import { collection, onSnapshot, query, limit } from "firebase/firestore";
+import { db } from "../firebase";
 
 export default function InstrumentListScreen() {
   const [selectedInstrument, setSelectedInstrument] = useState(null);
+  const [instruments, setInstruments] = useState([]);
+  const [loading, setLoading] = useState(true);
   const navigation = useNavigation();
 
+  useEffect(() => {
+    setLoading(true);
+    const q = query(collection(db, "instruments"), limit(50));
+    const unsub = onSnapshot(q, (querySnapshot) => {
+      const data = [];
+      querySnapshot.forEach((doc) =>
+        data.push({ ...doc.data(), instrument_token: doc.id })
+      );
+      setInstruments(data);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching instruments:", error);
+      setLoading(false);
+    });
+    return unsub;
+  }, []);
+
   const handleAction = (side) => {
-    setSelectedInstrument(null); // close sheet
+    setSelectedInstrument(null);
     navigation.navigate("OrderScreen", {
       instrument: selectedInstrument,
       side,
     });
   };
 
+  if (loading) return <ActivityIndicator size="large" style={{ flex: 1, alignSelf: "center" }} />;
+
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
       <FlatList
-        data={mockInstruments}
+        data={instruments}
         keyExtractor={(item) => item.instrument_token.toString()}
         renderItem={({ item }) => (
           <TouchableOpacity
@@ -37,11 +53,13 @@ export default function InstrumentListScreen() {
           >
             <Text style={{ fontSize: 16, fontWeight: "bold" }}>{item.tradingsymbol}</Text>
             <Text style={{ color: "#888" }}>{item.name}</Text>
+            <Text style={{ color: "#388e3c" }}>
+              ₹{item.last_price !== undefined ? item.last_price : "No price"}
+            </Text>
           </TouchableOpacity>
         )}
       />
 
-      {/* Inline modal instead of InstrumentDetailsSheet */}
       <Modal
         visible={!!selectedInstrument}
         transparent

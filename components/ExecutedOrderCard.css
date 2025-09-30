@@ -1,0 +1,161 @@
+.executed-card {
+  background: #fff;
+  border-radius: 13px;
+  box-shadow: 0 2px 10px rgba(44, 62, 80, 0.03);
+  padding: 13px 18px 11px 18px;
+  margin-bottom: 14px;
+  width: 100%;
+  max-width: 370px;
+  box-sizing: border-box;
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  border: 2px solid #8a97ab; /* Same neutral boundary as other tabs */
+  transition: border-color 0.18s;
+}
+
+/* All rows */
+.executed-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 0;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 0;
+}
+
+.executed-left-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Spacing between rows */
+.executed-row + .executed-row {
+  margin-top: 9px;
+}
+
+.badge {
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 2px 13px;
+  letter-spacing: 0.2px;
+  display: inline-block;
+  border: 1.5px solid transparent;
+  margin: 0;
+}
+
+.badge-type.buy {
+  background: #eaf4ff;
+  color: #1976d2;
+}
+
+.badge-type.sell {
+  background: #ffeaea;
+  color: #e53935;
+}
+
+/* Status badge: make boundary darker and match sizing with Open/Cancelled */
+.executed-card .badge.badge-status {
+  /* color and border-color are set inline; enforce stronger width and sizing */
+  border-width: 1.8px !important;
+  padding: 3px 16px;
+  border-radius: 6px;
+  min-width: 88px;
+  text-align: center;
+  letter-spacing: 0.1px;
+}
+
+.executed-qty {
+  font-size: 15px;
+  font-weight: 500;
+  color: #222;
+}
+
+.executed-time {
+  font-size: 15px;
+  color: #888;
+}
+
+.executed-instrument {
+  font-size: 18px;
+  font-weight: 600;
+  color: #222;
+  letter-spacing: 0.2px;
+}
+
+.avg-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.avg-label {
+  font-size: 15px;
+  color: #888;
+  font-weight: 500;
+}
+
+.avg-value {
+  font-size: 17px;
+  color: #1976d2;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.executed-exchange {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 44px;
+  color: #888;
+  background: none;
+  border: none;
+}
+
+.product-order-right {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.product-type.mis {
+  background: #eaf4ff;
+  color: #1976d2;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.product-type.nrml {
+  background: #f8f4ff;
+  color: #8e44ad;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.order-type.market {
+  background: #eaf5ea;
+  color: #22b573;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.order-type.limit {
+  background: #fffbe9;
+  color: #f5a623;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 2px 13px;
+}
+
+.no-data {
+  color: #888;
+  font-size: 16px;
+  font-weight: 500;
+}

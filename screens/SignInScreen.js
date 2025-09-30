@@ -1,78 +1,214 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from "react-native";
-import auth from "@react-native-firebase/auth";
-import firestore from "@react-native-firebase/firestore";
+import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, Pressable } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { auth, db } from "../firebase";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 export default function SignInScreen({ navigation, setUser }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [popupVisible, setPopupVisible] = useState(false);
+  const [popupMessage, setPopupMessage] = useState("");
 
-  const handleSignIn = async () => {
-    if (!email || !password) {
-      Alert.alert("Please enter both email and password!");
-      return;
-    }
+  function showPopup(message) {
+    setPopupMessage(message);
+    setPopupVisible(true);
+    setTimeout(() => setPopupVisible(false), 2500);
+  }
+
+  const handleGoogleSignIn = async () => {
     try {
-      // Sign in with Firebase Auth
-      const userCredential = await auth().signInWithEmailAndPassword(email, password);
-
-      // Load user profile from Firestore
-      const userDoc = await firestore().collection("users").doc(userCredential.user.uid).get();
+      const provider = new GoogleAuthProvider();
+      const userCredential = await signInWithPopup(auth, provider);
+      const userDocRef = doc(db, "users", userCredential.user.uid);
+      let userDoc = await getDoc(userDocRef);
+      if (!userDoc.exists()) {
+        await setDoc(userDocRef, {
+          email: userCredential.user.email,
+          name: userCredential.user.displayName,
+          provider: "google",
+          createdAt: new Date(),
+        });
+        userDoc = await getDoc(userDocRef);
+      }
       const userData = userDoc.data();
       setUser({ uid: userCredential.user.uid, ...userData });
-
-      navigation.replace("MainTabs");
-    } catch (error) {
-      if (error.code === "auth/user-not-found") {
-        Alert.alert("No account found. Please sign up first!");
-      } else if (error.code === "auth/wrong-password") {
-        Alert.alert("Invalid password!");
-      } else {
-        Alert.alert("Sign in failed!", error.message);
-      }
+      showPopup("Signed in with Google!");
+      setTimeout(() => navigation.replace("MainTabs"), 900);
+    } catch (err) {
+      showPopup("Google sign-in failed: " + err.message);
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Sign In</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Email Address"
-        keyboardType="email-address"
-        autoCapitalize="none"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-      <TouchableOpacity style={styles.signInBtn} onPress={handleSignIn}>
-        <Text style={styles.signInBtnText}>Sign In</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate("SignUp")}>
-        <Text style={styles.switchText}>
-          Don&apos;t have an account? <Text style={{ color: "#007AFF" }}>Sign Up</Text>
-        </Text>
-      </TouchableOpacity>
+      <Modal
+        visible={popupVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPopupVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setPopupVisible(false)}>
+          <View style={styles.popupBox}>
+            <Text style={styles.popupText}>{popupMessage}</Text>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <View style={styles.innerContainer}>
+        <View style={styles.logoWrapper}>
+          <Image source={require("../assets/app-icon.png")} style={styles.logoImg} resizeMode="contain" />
+          <Text style={styles.glowAppName}>FUNDEXIS</Text>
+        </View>
+
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.googleBtn}
+            activeOpacity={0.85}
+            onPress={handleGoogleSignIn}
+          >
+            <Ionicons name="logo-google" size={24} color="#007AFF" style={{ marginRight: 10 }} />
+            <Text style={styles.googleBtnText}>Sign In with Google</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity onPress={() => navigation.replace("SignUp")}>
+          <Text style={styles.switchText}>
+            <Text style={styles.switchLabel}>Don&apos;t have an account? </Text>
+            <Text style={styles.switchLink}>Sign Up</Text>
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
+const BLUE = "#007AFF";
+const BACKGROUND = "#007AFF";
+const WHITE = "#fff";
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7faff", padding: 24, justifyContent: "center" },
-  header: { fontSize: 28, fontWeight: "bold", color: "#007AFF", marginBottom: 36, alignSelf: "center" },
-  input: {
-    borderWidth: 1, borderColor: "#ddd", borderRadius: 7, padding: 14,
-    fontSize: 16, marginBottom: 18, backgroundColor: "#fff"
+  container: {
+    flex: 1,
+    backgroundColor: BACKGROUND,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "100%",
   },
-  signInBtn: {
-    backgroundColor: "#007AFF", paddingVertical: 14, borderRadius: 8, alignItems: "center", marginBottom: 12
+  innerContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    marginTop: -30,
   },
-  signInBtnText: { color: "#fff", fontWeight: "700", fontSize: 17 },
-  switchText: { color: "#555", textAlign: "center", marginTop: 16, fontSize: 15 }
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(40,40,40,0.18)",
+  },
+  popupBox: {
+    backgroundColor: "#fff",
+    paddingVertical: 20,
+    paddingHorizontal: 30,
+    borderRadius: 13,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.23,
+    shadowRadius: 13,
+    alignItems: "center",
+    minWidth: 200,
+    maxWidth: 300,
+  },
+  popupText: {
+    fontSize: 16,
+    color: BLUE,
+    textAlign: "center",
+    fontWeight: "600",
+    marginBottom: 12,
+  },
+  logoWrapper: {
+    alignItems: "center",
+    marginBottom: 25,
+    marginTop: 0,
+    width: "100%",
+  },
+  logoImg: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: WHITE,
+    marginBottom: 10,
+    shadowColor: BLUE,
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.13,
+    shadowRadius: 30,
+    elevation: 12,
+  },
+  glowAppName: {
+    fontSize: 34,
+    fontWeight: "bold",
+    color: WHITE,
+    letterSpacing: 2,
+    marginBottom: 4,
+    textTransform: "uppercase",
+    textAlign: "center",
+    textShadowColor: "#4fc3f7",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 12,
+  },
+  card: {
+    backgroundColor: "transparent",
+    borderRadius: 18,
+    width: "100%",
+    alignItems: "center",
+    marginBottom: 24,
+    marginTop: 10,
+    borderWidth: 0,
+  },
+  googleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: WHITE,
+    borderRadius: 25,
+    paddingVertical: 18,
+    paddingHorizontal: 32,
+    marginBottom: 2,
+    elevation: 2,
+    minWidth: 250,
+    maxWidth: 320,
+    justifyContent: "center",
+    shadowColor: "#007AFF",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 2,
+    borderColor: "#e3f2fd",
+  },
+  googleBtnText: {
+    color: BLUE,
+    fontWeight: "700",
+    fontSize: 20,
+    textAlign: "center",
+    letterSpacing: 0.5,
+  },
+  switchText: {
+    color: WHITE,
+    textAlign: "center",
+    fontSize: 16,
+    marginBottom: 12,
+    fontWeight: "500",
+    marginTop: 10,
+  },
+  switchLabel: {
+    color: WHITE,
+  },
+  switchLink: {
+    color: WHITE,
+    fontWeight: "bold",
+    fontSize: 16,
+    textDecorationLine: "underline",
+    backgroundColor: "transparent",
+    paddingLeft: 2,
+  },
 });

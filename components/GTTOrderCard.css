@@ -1,0 +1,199 @@
+.gtt-card {
+  background: #fff;
+  border-radius: 14px;
+  border: 2px solid #8b97ae !important;   /* Even darker, visible border */
+  box-shadow: 0 2px 10px rgba(44, 62, 80, 0.03);
+  padding: 14px 18px;
+  margin-bottom: 13px;
+  width: 100%;
+  max-width: 370px;
+  box-sizing: border-box;
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  transition: box-shadow 0.12s, border 0.12s;
+}
+
+.gtt-card:active, .gtt-card:focus, .gtt-card:hover {
+  box-shadow: 0 3px 18px rgba(36, 54, 102, 0.10);
+  border-color: #738099 !important;
+}
+
+.gtt-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.space-between {
+  justify-content: space-between;
+}
+
+.center {
+  justify-content: center;
+}
+
+.gtt-row-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gtt-row-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge {
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 2px 13px;
+  letter-spacing: 0.2px;
+  display: inline-block;
+  border: 1.5px solid transparent;
+}
+
+.badge-type.buy {
+  background: #eaf4ff;
+  color: #1976d2;
+}
+
+.badge-type.sell {
+  background: #ffeaea;
+  color: #e53935;
+}
+
+.badge-trigger-type {
+  background: #f2f2f2;
+  color: #222;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 5px;
+  padding: 2px 13px;
+  margin-right: 5px;
+}
+
+.badge-status-gtt {
+  background: #f6fffa;
+  color: #22b573;
+  border: 1px solid #22b573;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 3px 16px;
+  border-radius: 5px;
+  min-width: 70px;
+  text-align: center;
+  letter-spacing: 0.1px;
+}
+
+.instrument-avg-row {
+  margin-top: 14px;
+}
+
+.gtt-instrument {
+  font-size: 18px;
+  font-weight: 600;
+  color: #222;
+  letter-spacing: 0.2px;
+}
+
+.gtt-trigger-price {
+  font-size: 17px;
+  color: #1976d2;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.bottom-row {
+  margin-top: 14px;
+}
+
+.gtt-qty-label {
+  font-size: 15px;
+  color: #888;
+  font-weight: 500;
+  min-width: 44px;
+}
+
+.gtt-ltp-label {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1976d2;
+}
+
+.no-data {
+  color: #888;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* Modal Styles for GTT Orders */
+.gtt-modal-overlay {
+  position: fixed;
+  z-index: 999;
+  inset: 0;
+  background: rgba(44,62,80,0.12);
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+}
+
+.gtt-modal {
+  width: 100%;
+  max-width: 370px;
+  border-radius: 15px 15px 0 0;
+  background: #fff;
+  box-shadow: 0 -2px 16px rgba(44, 62, 80, 0.13);
+  padding: 32px 18px 28px 18px;
+  margin-bottom: 0;
+  min-height: 200px;
+}
+
+.gtt-modal-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gtt-modal-header {
+  font-size: 18px;
+  font-weight: 700;
+  color: #222;
+  margin-bottom: 28px;
+}
+
+.gtt-modal-actions {
+  display: flex;
+  width: 100%;
+  gap: 22px;
+  justify-content: space-between;
+}
+
+.gtt-modify-btn {
+  background: #1976d2;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 13px 0;
+  width: 48%;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px #1976d229;
+  transition: background 0.17s;
+}
+
+.gtt-cancel-btn {
+  background: #e53935;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 13px 0;
+  width: 48%;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px #e5393529;
+  transition: background 0.17s;
+}
