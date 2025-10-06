@@ -17,7 +17,7 @@ import { useTheme } from "../context/ThemeContext";
 import { useChallenge } from "../context/ChallengeContext";
 import OrdersTab from "./OrdersTab";
 import instrumentsData from "../data/instruments.json";
-import useRestLivePrices from "../hooks/useRestLivePrices"; // REST polling hook for prices
+import useRestLivePrices from "../hooks/useRestLivePrices";
 import { useOrderSocket } from "../hooks/useOrderSocket";
 import { useLimitOrderExecutor } from "../hooks/useLimitOrderExecutor";
 import {
@@ -521,7 +521,13 @@ export default function DemoTradingScreen() {
         .filter((t) => t && t.length > 0),
     [rankedIndexed]
   );
+  // Debug: log visibleTokens
+  console.log("DEMOTRADING - VISIBLE TOKENS FOR SEARCH:", visibleTokens);
+
   const livePrices = useRestLivePrices(visibleTokens, 1000);
+  useEffect(() => {
+    console.log("DEMOTRADING - LIVE PRICES OBJECT:", livePrices);
+  }, [livePrices]);
 
   const activeTradeTokens = useMemo(
     () =>
@@ -566,7 +572,14 @@ export default function DemoTradingScreen() {
         instrumentsData.find((m) => m.tradingsymbol === trade.tradingsymbol || m.symbol === trade.tradingsymbol)
           ?.instrument_token;
 
-      const liveLtp = activeTradeLTPs[String(token)];
+      const liveLtpObj = activeTradeLTPs[String(token)];
+      const liveLtp =
+        (liveLtpObj && typeof liveLtpObj === "object"
+          ? liveLtpObj.price ?? liveLtpObj.last_price ?? liveLtpObj.ltp
+          : typeof liveLtpObj === "number"
+          ? liveLtpObj
+          : undefined);
+
       const displayLtp = (typeof liveLtp === "number" ? liveLtp : undefined) ?? trade.ltp ?? trade.price ?? 0;
 
       const entryPrice = trade.price ?? 0;
@@ -1011,12 +1024,26 @@ export default function DemoTradingScreen() {
           <FlatList
             data={rankedInstruments.slice(0, 20).map((inst) => {
               const tokenStr = String(inst.instrument_token ?? inst.token ?? "");
-              const ltp = tokenStr ? livePrices[tokenStr] : undefined;
+              let priceVal = undefined;
+              const priceObj = livePrices[tokenStr];
+              // Debug: log token and price object
+              console.log("DEMOTRADING - RENDER TOKEN:", tokenStr, "PRICE OBJ:", priceObj);
+
+              if (priceObj && typeof priceObj === "object") {
+                priceVal =
+                  priceObj.price ??
+                  priceObj.last_price ??
+                  priceObj.ltp ??
+                  (typeof priceObj === "number" ? priceObj : undefined);
+              } else if (typeof priceObj === "number") {
+                priceVal = priceObj;
+              }
+
               const cp = tokenStr ? closePrices[tokenStr] : undefined;
               return {
                 ...inst,
                 _tokenStr: tokenStr,
-                last_price: ltp,
+                last_price: priceVal,
                 close_price: cp,
               };
             })}
@@ -1029,10 +1056,16 @@ export default function DemoTradingScreen() {
               const line2 = [line2Core, parts.weekly ? "(W)" : "", ex ? `• ${ex}` : ""]
                 .filter(Boolean)
                 .join(" ")
-                .replace(/\s+•/, " •");
-              const priceVal = marketOpen
-                ? item.last_price ?? item.close_price
-                : item.close_price ?? item.last_price;
+                .replace(/\s+•/, " • ");
+
+              let priceVal = item.last_price;
+              if (priceVal && typeof priceVal === "object") {
+                priceVal =
+                  priceVal.price ??
+                  priceVal.last_price ??
+                  priceVal.ltp ??
+                  (typeof priceVal === "number" ? priceVal : undefined);
+              }
 
               const rawCode = getSymbolRaw(item);
               const equityName = getName(item);
@@ -1076,7 +1109,7 @@ export default function DemoTradingScreen() {
                     )}
                   </View>
                   <Text style={styles.price}>
-                    {priceVal !== undefined && priceVal !== null && priceVal !== "—" ? `₹${priceVal}` : "—"}
+                    {typeof priceVal === "number" && !isNaN(priceVal) ? `₹${priceVal}` : "—"}
                   </Text>
                 </TouchableOpacity>
               );
