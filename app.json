@@ -31,7 +31,13 @@
       }
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "react-native-iap",
+        {
+          "flavor": "play"
+        }
+      ]
     ]
   }
 }
