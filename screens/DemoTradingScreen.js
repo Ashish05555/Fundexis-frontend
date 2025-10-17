@@ -1104,7 +1104,6 @@ export default function DemoTradingScreen() {
               const line2Core = parts.line2;
               const line2 = [line2Core, parts.weekly ? "(W)" : ""]
                 .filter(Boolean)
-                .join(" ");
                 .join(" ")
                 .replace(/\s+•/, " • ");
 
