@@ -567,6 +567,7 @@ export default function DemoTradingScreen() {
         .filter((t) => t && t.length > 0),
     [rankedIndexed]
   );
+  // Debug: log visibleTokens
   console.log("DEMOTRADING - VISIBLE TOKENS FOR SEARCH:", visibleTokens);
 
   const livePrices = useRestLivePrices(visibleTokens, 1000);
@@ -1071,6 +1072,8 @@ export default function DemoTradingScreen() {
               const tokenStr = String(inst.instrument_token ?? inst.token ?? "");
               let priceVal = undefined;
               const priceObj = livePrices[tokenStr];
+              // Debug: log token and price object
+              console.log("DEMOTRADING - RENDER TOKEN:", tokenStr, "PRICE OBJ:", priceObj);
 
               if (priceObj && typeof priceObj === "object") {
                 priceVal =
@@ -1102,6 +1105,9 @@ export default function DemoTradingScreen() {
               const line2 = [line2Core, parts.weekly ? "(W)" : ""]
                 .filter(Boolean)
                 .join(" ");
+                .join(" ")
+                .replace(/\s+•/, " • ");
+
 
               let priceVal = item.last_price;
               if (priceVal && typeof priceVal === "object") {
@@ -1167,6 +1173,8 @@ export default function DemoTradingScreen() {
                     {typeof priceVal === "number" && !isNaN(priceVal)
                       ? formatPriceForRow(item, priceVal)
                       : "—"}
+                  <Text style={styles.price}>
+                    {typeof priceVal === "number" && !isNaN(priceVal) ? `₹${priceVal}` : "—"}
                   </Text>
                 </TouchableOpacity>
               );
