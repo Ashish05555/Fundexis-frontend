@@ -17,7 +17,7 @@ import { useTheme } from "../context/ThemeContext";
 import { useChallenge } from "../context/ChallengeContext";
 import OrdersTab from "./OrdersTab";
 import instrumentsData from "../data/instruments.json";
-import useRestLivePrices from "../hooks/useRestLivePrices"; // REST polling hook for prices
+import useRestLivePrices from "../hooks/useRestLivePrices";
 import { useOrderSocket } from "../hooks/useOrderSocket";
 import { useLimitOrderExecutor } from "../hooks/useLimitOrderExecutor";
 import {
@@ -57,15 +57,16 @@ const MARKET_OPEN_IST = { hour: 9, minute: 15 };
 const MARKET_CLOSE_IST = { hour: 15, minute: 30 };
 const MIS_SQOFF_MINUTES_BEFORE_CLOSE = 5;
 
-const NSE_RED = "#ef5350";
-const BSE_BLUE = "#2D6CDF";
+const NSE_RED = "#FF5C5C";
+const BSE_BLUE = "#3B82F6";
 
 const norm = (s = "") => s.toString().trim().toLowerCase();
 const getExchange = (inst = {}) => {
   const raw = (
     inst.exchange ?? inst.exch ?? inst.segment ?? inst.exchSegment ?? ""
   ).toString().toUpperCase();
-  if (raw.includes("NFO") || raw.includes("NSE")) return "NSE";
+  if (raw.includes("NFO")) return "NFO";
+  if (raw.includes("NSE")) return "NSE";
   if (raw.includes("BSE")) return "BSE";
   return raw || "NSE";
 };
@@ -79,13 +80,6 @@ const baseKey = (inst = {}) => {
   const sym = norm(getComparableSymbol(inst));
   const nm = norm(getName(inst));
   return sym || nm.replace(/\s+/g, "");
-};
-
-const getExchangeColor = (exchange) => {
-  const ex = (exchange || "").toString().toUpperCase();
-  if (ex === "NSE") return NSE_RED;
-  if (ex === "BSE") return BSE_BLUE;
-  return "#666";
 };
 
 function ymd(d) {
@@ -239,6 +233,7 @@ function getExchangeFromToken(tokenStr) {
   const i = instByToken(tokenStr);
   const exRaw = String(i?.exchange || i?.exch || i?.segment || i?.exchSegment || "").toUpperCase();
   if (exRaw.includes("BSE")) return "BSE";
+  if (exRaw.includes("NFO")) return "NFO";
   return "NSE";
 }
 
@@ -281,6 +276,58 @@ function buildExitSnapshot(trades, liveMapByToken = {}) {
     out.set(tok, { price: chosen, tick, exchange: getExchangeFromToken(tok) });
   }
   return out;
+}
+
+/**
+ * Price formatter consistent with Search UI:
+ * - NFO or derivatives: no ₹
+ * - NSE/BSE: prefix ₹
+ * - null/undefined: show —
+ */
+function formatPriceForRow(inst, lastPrice) {
+  const ex = getExchange(inst);
+  const isNFO = inst.isDeriv === true || ex === "NFO";
+  if (lastPrice === null || lastPrice === undefined || lastPrice === "—") return "—";
+  if (isNFO) return `${lastPrice}`;
+  return `₹ ${lastPrice}`;
+}
+
+/**
+ * ExchangeTag shown only for NSE/BSE; hidden for NFO/derivatives.
+ */
+function ExchangeTag({ exchange, theme }) {
+  if (exchange === "NFO") return null;
+  const isDark = theme.mode === "dark";
+  let bgColor, borderColor, textColor;
+  if (exchange === "NSE") {
+    bgColor = isDark ? "rgba(255,92,92,0.12)" : "#FFEEEE";
+    borderColor = NSE_RED;
+    textColor = NSE_RED;
+  } else if (exchange === "BSE") {
+    bgColor = isDark ? "rgba(59,130,246,0.12)" : "#E9F3FF";
+    borderColor = BSE_BLUE;
+    textColor = BSE_BLUE;
+  } else {
+    return null;
+  }
+  return (
+    <View
+      style={{
+        backgroundColor: bgColor,
+        borderWidth: 1,
+        borderColor,
+        borderRadius: 8,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        marginLeft: 8,
+        alignSelf: "center",
+      }}
+      accessible
+      accessibilityLabel={`Exchange: ${exchange}`}
+    >
+      <Text style={{ fontSize: 12, color: textColor, fontWeight: "600" }}>{exchange}</Text>
+    </View>
+  );
 }
 
 export default function DemoTradingScreen() {
@@ -464,7 +511,7 @@ export default function DemoTradingScreen() {
       tradesRef,
       (snap) => {
         setFetchError(null);
-        const allTrades = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const allTrades = snap.docs.map((d) => ({ id: d.id, ...d.data() })); 
         setActiveTrades(allTrades.filter((trade) => String(trade.status).toUpperCase() === "ACTIVE"));
         setTradeHistory(
           allTrades.filter((trade) => {
@@ -512,7 +559,6 @@ export default function DemoTradingScreen() {
   );
   const rankedInstruments = useMemo(() => rankedIndexed.map((r) => r.inst), [rankedIndexed]);
 
-  // ------ USE REST POLLING FOR LIVE PRICES ------
   const visibleTokens = useMemo(
     () =>
       rankedIndexed
@@ -521,7 +567,12 @@ export default function DemoTradingScreen() {
         .filter((t) => t && t.length > 0),
     [rankedIndexed]
   );
+  console.log("DEMOTRADING - VISIBLE TOKENS FOR SEARCH:", visibleTokens);
+
   const livePrices = useRestLivePrices(visibleTokens, 1000);
+  useEffect(() => {
+    console.log("DEMOTRADING - LIVE PRICES OBJECT:", livePrices);
+  }, [livePrices]);
 
   const activeTradeTokens = useMemo(
     () =>
@@ -566,7 +617,14 @@ export default function DemoTradingScreen() {
         instrumentsData.find((m) => m.tradingsymbol === trade.tradingsymbol || m.symbol === trade.tradingsymbol)
           ?.instrument_token;
 
-      const liveLtp = activeTradeLTPs[String(token)];
+      const liveLtpObj = activeTradeLTPs[String(token)];
+      const liveLtp =
+        (liveLtpObj && typeof liveLtpObj === "object"
+          ? liveLtpObj.price ?? liveLtpObj.last_price ?? liveLtpObj.ltp
+          : typeof liveLtpObj === "number"
+          ? liveLtpObj
+          : undefined);
+
       const displayLtp = (typeof liveLtp === "number" ? liveLtp : undefined) ?? trade.ltp ?? trade.price ?? 0;
 
       const entryPrice = trade.price ?? 0;
@@ -1011,28 +1069,48 @@ export default function DemoTradingScreen() {
           <FlatList
             data={rankedInstruments.slice(0, 20).map((inst) => {
               const tokenStr = String(inst.instrument_token ?? inst.token ?? "");
-              const ltp = tokenStr ? livePrices[tokenStr] : undefined;
+              let priceVal = undefined;
+              const priceObj = livePrices[tokenStr];
+
+              if (priceObj && typeof priceObj === "object") {
+                priceVal =
+                  priceObj.price ??
+                  priceObj.last_price ??
+                  priceObj.ltp ??
+                  (typeof priceObj === "number" ? priceObj : undefined);
+              } else if (typeof priceObj === "number") {
+                priceVal = priceObj;
+              }
+
               const cp = tokenStr ? closePrices[tokenStr] : undefined;
               return {
                 ...inst,
                 _tokenStr: tokenStr,
-                last_price: ltp,
+                last_price: priceVal,
                 close_price: cp,
               };
             })}
             keyExtractor={(item, idx) => String(item.instrument_token ?? item._tokenStr ?? idx)}
             renderItem={({ item }) => {
               const ex = getExchange(item);
+              const isNFO = item.isDeriv === true || ex === "NFO";
               const parts = getTwoLineParts(item);
               const line1 = parts.line1 || getSymbolRaw(item);
+
+              // Secondary text: NO exchange here anymore (kept optional info only)
               const line2Core = parts.line2;
-              const line2 = [line2Core, parts.weekly ? "(W)" : "", ex ? `• ${ex}` : ""]
+              const line2 = [line2Core, parts.weekly ? "(W)" : ""]
                 .filter(Boolean)
-                .join(" ")
-                .replace(/\s+•/, " •");
-              const priceVal = marketOpen
-                ? item.last_price ?? item.close_price
-                : item.close_price ?? item.last_price;
+                .join(" ");
+
+              let priceVal = item.last_price;
+              if (priceVal && typeof priceVal === "object") {
+                priceVal =
+                  priceVal.price ??
+                  priceVal.last_price ??
+                  priceVal.ltp ??
+                  (typeof priceVal === "number" ? priceVal : undefined);
+              }
 
               const rawCode = getSymbolRaw(item);
               const equityName = getName(item);
@@ -1061,22 +1139,34 @@ export default function DemoTradingScreen() {
                       searchQuery: q,
                     });
                   }}
+                  activeOpacity={0.85}
                 >
                   <View style={{ flexShrink: 1, paddingRight: 10, flex: 1 }}>
-                    <Text style={[styles.titleLine]} numberOfLines={1}>
-                      {line1}
-                    </Text>
-                    <Text style={[styles.subLine, { color: theme.textSecondary }]} numberOfLines={1}>
-                      {line2}
-                    </Text>
+                    {/* Line 1: Name + Exchange Tag (for NSE/BSE only) */}
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <Text style={[styles.titleLine, { color: theme.text }]} numberOfLines={1}>
+                        {line1}
+                      </Text>
+                      {!isNFO && <ExchangeTag exchange={ex} theme={theme} />}
+                    </View>
+
+                    {/* Optional secondary info (no exchange here) */}
+                    {!!line2 && (
+                      <Text style={[styles.subLine, { color: theme.textSecondary }]} numberOfLines={1}>
+                        {line2}
+                      </Text>
+                    )}
                     {!!tertiary && (
                       <Text style={[styles.tertiary, { color: theme.textSecondary }]} numberOfLines={1}>
                         {tertiary}
                       </Text>
                     )}
                   </View>
-                  <Text style={styles.price}>
-                    {priceVal !== undefined && priceVal !== null && priceVal !== "—" ? `₹${priceVal}` : "—"}
+
+                  <Text style={[styles.price, { color: theme.text }]}>
+                    {typeof priceVal === "number" && !isNaN(priceVal)
+                      ? formatPriceForRow(item, priceVal)
+                      : "—"}
                   </Text>
                 </TouchableOpacity>
               );
@@ -1438,7 +1528,7 @@ const styles = StyleSheet.create({
   titleLine: { fontSize: 16, fontWeight: "700", color: "#111" },
   subLine: { fontSize: 12.5, fontWeight: "600" },
   tertiary: { fontSize: 11, marginTop: 2 },
-  price: { fontSize: 16, fontWeight: "bold", color: "#22b573", marginLeft: 10 },
+  price: { fontSize: 16, fontWeight: "bold", marginLeft: 10 },
   emptyText: {
     textAlign: "center",
     fontSize: 15,
