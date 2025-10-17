@@ -1,21 +1,16 @@
 {
   "cli": {
-    "version": ">= 16.13.4",
-    "appVersionSource": "remote"
+    "version": ">= 3.14.0",
+    "appVersionSource": "local"
   },
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal"
-    },
     "preview": {
-      "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "REACT_NATIVE_IAP_FLAVOR": "play"
       }
-    },
-    "production": {
-      "autoIncrement": true
     }
   },
   "submit": {
