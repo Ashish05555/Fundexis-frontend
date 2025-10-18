@@ -7,9 +7,6 @@
     "preview": {
       "android": {
         "buildType": "apk"
-      },
-      "env": {
-        "REACT_NATIVE_IAP_FLAVOR": "play"
       }
     }
   },
