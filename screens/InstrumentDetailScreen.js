@@ -12,6 +12,17 @@ import { useLivePrice } from "../context/LivePriceProvider";
 import { useTheme } from "../context/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
 
+// Helper to extract numeric price from object or number
+function extractPrice(val) {
+  if (typeof val === "number") return val;
+  if (val && typeof val === "object") {
+    if (typeof val.price === "number") return val.price;
+    if (typeof val.last_price === "number") return val.last_price;
+    if (typeof val.ltp === "number") return val.ltp;
+  }
+  return undefined;
+}
+
 // Market hours helper
 function isMarketClosed() {
   const now = new Date();
@@ -42,7 +53,8 @@ export default function InstrumentDetailScreen({ route, navigation }) {
   }, [navigation]);
 
   // LIVE PRICE - use context and refresh subscription on focus
-  const livePrice = useLivePrice(instrumentToken);
+  let livePriceRaw = useLivePrice(instrumentToken);
+  let livePrice = extractPrice(livePriceRaw);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -57,12 +69,12 @@ export default function InstrumentDetailScreen({ route, navigation }) {
   const marketClosed = isMarketClosed();
   let lastPrice;
   if (marketClosed) {
-    lastPrice = instrument?.close ?? instrument?.last_price ?? "—";
+    lastPrice = extractPrice(instrument?.close) ?? extractPrice(instrument?.last_price) ?? "—";
   } else {
     lastPrice =
       typeof livePrice === "number" && livePrice !== 0
         ? livePrice
-        : instrument?.last_price ?? instrument?.close ?? "—";
+        : extractPrice(instrument?.last_price) ?? extractPrice(instrument?.close) ?? "—";
   }
 
   if (!instrument || !instrumentToken) {
@@ -120,11 +132,11 @@ export default function InstrumentDetailScreen({ route, navigation }) {
         <Text style={[styles.livePriceLabel, { color: theme.textSecondary }]}>
           {marketClosed ? "Last Price" : "Live Price"}
         </Text>
-        {lastPrice === "—" || lastPrice === undefined || lastPrice === null ? (
+        {(lastPrice === "—" || lastPrice === undefined || lastPrice === null) ? (
           <ActivityIndicator size="small" color={theme.brand} />
         ) : (
           <Text style={[styles.livePriceValue, { color: theme.brand }]}>
-            {`₹${lastPrice}`}
+            {typeof lastPrice === "number" ? `₹${lastPrice}` : "—"}
           </Text>
         )}
         {showNoLivePriceWarning && (

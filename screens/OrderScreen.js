@@ -25,6 +25,15 @@ const ORDER_TYPES = ["MARKET", "LIMIT"];
 const VARIETIES = ["REGULAR", "AMO"];
 
 // --- Helpers ---
+function extractPrice(val) {
+  if (typeof val === "number") return val;
+  if (val && typeof val === "object") {
+    if (typeof val.price === "number") return val.price;
+    if (typeof val.last_price === "number") return val.last_price;
+    if (typeof val.ltp === "number") return val.ltp;
+  }
+  return undefined;
+}
 function removeUndefined(obj) {
   if (Array.isArray(obj)) return obj.map(removeUndefined);
   if (obj && typeof obj === "object") {
@@ -192,6 +201,7 @@ export default function OrderScreen() {
   const [errorMsg, setErrorMsg] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const [previewData, setPreviewData] = useState(null);
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
   const [marketOpen, setMarketOpen] = useState(isMarketOpen());
 
   const lotSize = parseInt(instrument?.lotSize || instrument?.lot_size || 1);
@@ -201,24 +211,24 @@ export default function OrderScreen() {
   const maxPrice = circuitLimit.upper ?? undefined;
 
   const resolvedToken = useMemo(() => resolveInstrumentToken(instrument, orderFromModify), [instrument, orderFromModify]);
-  const livePriceFromFeed = useLivePrice(resolvedToken);
+  let livePriceFromFeedRaw = useLivePrice(resolvedToken);
+  let livePriceFromFeed = extractPrice(livePriceFromFeedRaw);
 
   const lastPrice = useMemo(() => {
     if (typeof livePriceFromFeed === "number" && !Number.isNaN(livePriceFromFeed)) return livePriceFromFeed;
     const o = orderFromModify || {};
     const candidates = [
-      o.ltp,
-      o.last_price,
-      o.avg_price,
-      o.executionPrice,
-      o.stoploss_limit,
-      o.price,
-      instrument.last_price,
-      instrument.close,
+      extractPrice(o.ltp),
+      extractPrice(o.last_price),
+      extractPrice(o.avg_price),
+      extractPrice(o.executionPrice),
+      extractPrice(o.stoploss_limit),
+      extractPrice(o.price),
+      extractPrice(instrument.last_price),
+      extractPrice(instrument.close),
     ];
     for (const c of candidates) {
-      const n = Number(c);
-      if (Number.isFinite(n) && n > 0) return n;
+      if (typeof c === "number" && c > 0) return c;
     }
     return undefined;
   }, [livePriceFromFeed, orderFromModify, instrument]);

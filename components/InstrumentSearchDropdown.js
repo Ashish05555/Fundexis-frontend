@@ -1,37 +1,93 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { View, Text, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator } from "react-native";
-import useLivePrices from "../hooks/useLivePrices";
+import io from "socket.io-client";
 
-// Helper to determine if the market is closed (default: 15:30 IST for NSE/BSE)
-function isMarketClosed() {
-  const now = new Date();
-  const closeHour = 15;
-  const closeMinute = 30;
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  return hour > closeHour || (hour === closeHour && minute >= closeMinute);
+// --- USE YOUR CLOUD RUN BACKEND/SOCKET URL ---
+const SOCKET_URL = "https://fundexis-backend-758832599619.us-central1.run.app"; // Cloud Run backend
+
+async function fetchMarketStatus() {
+  try {
+    const res = await fetch("/api/market-status");
+    const data = await res.json();
+    return data.open || false;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchBatchPrices(tokens) {
+  if (!tokens.length) return {};
+  const qs = encodeURIComponent(tokens.join(","));
+  const res = await fetch(`/api/prices/batch?tokens=${qs}`);
+  return await res.json();
 }
 
 export default function InstrumentSearchDropdown({ data, onSelect }) {
-  // Collect all instrument tokens from the passed data
-  const instrumentTokens = data.map(item => item.instrument_token);
+  const [marketOpen, setMarketOpen] = useState(false);
+  const [prices, setPrices] = useState({});
+  const [loading, setLoading] = useState(false);
+  const socketRef = useRef(null);
+  const intervalRef = useRef(null);
 
-  // Fetch live prices for all tokens
-  const livePrices = useLivePrices(instrumentTokens);
+  // --- 1. Check market status on mount ---
+  useEffect(() => {
+    fetchMarketStatus().then(setMarketOpen);
+  }, []);
 
-  // Attach live price to each item
-  const dataWithPrice = data.map(item => ({
-    ...item,
-    last_price: livePrices[item.instrument_token]
-  }));
+  // --- 2. Create/cleanup socket only if market is open ---
+  useEffect(() => {
+    if (marketOpen && !socketRef.current) {
+      socketRef.current = io(SOCKET_URL, { transports: ["websocket"] });
+    }
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+    };
+  }, [marketOpen]);
 
-  const marketClosed = isMarketClosed();
+  // --- 3. Subscribe to visible tokens and update prices ---
+  useEffect(() => {
+    const visibleTokens = data.map(item => String(item.instrument_token));
+    if (!visibleTokens.length) return;
 
-  // Loading indicator if prices are not available yet
-  const allPricesFetched = instrumentTokens.every(token => livePrices[token] !== undefined);
+    if (marketOpen) {
+      setLoading(false);
+      const socket = socketRef.current;
+      if (!socket) return;
 
-  if (!dataWithPrice.length) return null;
-  if (!allPricesFetched) {
+      // Remove previous listener
+      socket.off("prices");
+
+      // Subscribe to new tokens
+      socket.emit("subscribe", visibleTokens);
+
+      // Listen for prices
+      socket.on("prices", (pricesObj) => {
+        setPrices(pricesObj || {});
+      });
+
+      // Clean up on change
+      return () => {
+        socket.off("prices");
+      };
+    } else {
+      // REST: fetch prices, refresh every 10s
+      setLoading(true);
+      const fetchPrices = () => {
+        fetchBatchPrices(visibleTokens)
+          .then(res => setPrices(res))
+          .finally(() => setLoading(false));
+      };
+      fetchPrices();
+      intervalRef.current = setInterval(fetchPrices, 10000);
+      return () => clearInterval(intervalRef.current);
+    }
+  }, [data.map(i => i.instrument_token).join(","), marketOpen]);
+
+  if (!data.length) return null;
+  if (!marketOpen && loading) {
     return (
       <View style={{ alignItems: "center", padding: 40 }}>
         <ActivityIndicator size="large" color="#1b8d3c" />
@@ -40,23 +96,20 @@ export default function InstrumentSearchDropdown({ data, onSelect }) {
     );
   }
 
-  // Price display logic (will show nothing if no price is available)
   function getDisplayPrice(item) {
-    if (
-      item.last_price !== undefined &&
-      item.last_price !== null &&
-      Number(item.last_price) > 0
-    ) {
-      return `₹${item.last_price}`; // Show last price as live/close price
-    } else {
-      return ""; // Show nothing if price is not available
+    // Accept both {instrument_token: price} and {instrument_token: {price: x}}
+    const val = prices[String(item.instrument_token)];
+    const price = typeof val === "object" && val !== null ? Number(val.price) : Number(val);
+    if (!isNaN(price) && price > 0) {
+      return `₹${price}`;
     }
+    return "";
   }
 
   return (
     <View style={styles.dropdownCard}>
       <FlatList
-        data={dataWithPrice}
+        data={data}
         keyExtractor={item => item.instrument_token.toString()}
         renderItem={({ item }) => (
           <TouchableOpacity style={styles.itemRow} onPress={() => onSelect(item)}>
@@ -64,13 +117,9 @@ export default function InstrumentSearchDropdown({ data, onSelect }) {
               <Text style={styles.symbol}>{item.tradingsymbol}</Text>
               <Text style={styles.name}>{item.name}</Text>
             </View>
-            {
-              getDisplayPrice(item) !== "" && (
-                <Text style={styles.price}>
-                  {getDisplayPrice(item)}
-                </Text>
-              )
-            }
+            {getDisplayPrice(item) !== "" && (
+              <Text style={styles.price}>{getDisplayPrice(item)}</Text>
+            )}
           </TouchableOpacity>
         )}
         keyboardShouldPersistTaps="handled"

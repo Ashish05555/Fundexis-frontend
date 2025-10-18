@@ -1,30 +1,14 @@
-import { io } from "socket.io-client";
+import io from "socket.io-client";
 
-// Load from environment for maximum flexibility
-// If not using REACT_APP_SOCKET_URL, fallback to hardcoded Cloud Run URL
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "https://fundexis-backend-758832599619.us-central1.run.app";
+// Use REACT_APP_SOCKET_URL from .env, fallback to your DigitalOcean IP and port 9090
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "ws://159.65.157.202:9090";
 
-// Debug: Print which socket URL is being used at runtime!
-console.log("Connecting to SOCKET_URL:", SOCKET_URL);
-
+// Export a singleton socket instance, or a function to get socket
 const socket = io(SOCKET_URL, {
-  transports: ["websocket"], // Only websocket for Cloud Run
-  withCredentials: true,
-  autoConnect: true,
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000,
-});
-
-// Debug connection events
-socket.on("connect", () => {
-  console.log("Socket connected!", socket.id);
-});
-socket.on("disconnect", () => {
-  console.log("Socket disconnected!");
-});
-socket.on("connect_error", (err) => {
-  console.error("Socket connection error:", err);
+  transports: ["websocket"],
+  path: "/socket.io/",
+  // If you need credentials/cookies, add: withCredentials: true
+  // If you need to force 'secure' for wss, add: secure: true
 });
 
 export default socket;

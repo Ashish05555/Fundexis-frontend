@@ -1,3 +1,21 @@
+/**
+ * SearchScreen.js
+ *
+ * - Zerodha-like instrument search UI for search results.
+ * - Props:
+ *    - onSelect?: function(instrument) => void  // optional; if provided, called when a row is pressed. Otherwise navigates to "InstrumentDetailScreen".
+ * - Data dependency for each instrument object:
+ *    {
+ *      id?: string,
+ *      token?: number | string,
+ *      name?: string,
+ *      symbol?: string,
+ *      exchange?: 'NSE' | 'BSE' | 'NFO',
+ *      isDeriv?: boolean,
+ *      lastPrice?: number
+ *    }
+ */
+
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -9,15 +27,16 @@ import {
   ActivityIndicator,
   TouchableOpacity,
 } from 'react-native';
+import PropTypes from 'prop-types';
 import { useNavigation } from '@react-navigation/native';
 
 import { searchInstruments } from '../services/apiService';
-import { useLivePrices } from "../context/LivePriceProvider";
+import { LivePriceProvider, useLivePrices } from "../context/LivePriceProvider";
 import { formatInstrumentName, buildSearchKeywords } from "../utils/instrumentName";
+import { useTheme } from '../context/ThemeContext';
 
-// Constants & helpers
-const NSE_RED = "#ef5350";
-const BSE_BLUE = "#2D6CDF";
+const NSE_RED = "#FF5C5C";
+const BSE_BLUE = "#3B82F6";
 
 const norm = (s = "") => s.toString().trim().toLowerCase();
 const escapeRegExp = (s = "") => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -31,6 +50,7 @@ const getExchange = (inst = {}) => {
       "").toString().toUpperCase();
   if (raw.includes("NSE")) return "NSE";
   if (raw.includes("BSE")) return "BSE";
+  if (raw.includes("NFO")) return "NFO";
   return raw || "";
 };
 
@@ -65,7 +85,6 @@ function scoreInstrument(query, inst) {
 
   let score = 0;
 
-  // Human-friendly name and keywords
   if (displayName === q) score += 11000;
   if (displayName.startsWith(q)) score += 6500;
   if (displayName.includes(q)) score += 1400;
@@ -74,7 +93,6 @@ function scoreInstrument(query, inst) {
   if (keywords.some(k => k.startsWith(q))) score += 6200;
   if (keywords.some(k => k.includes(q))) score += 1300;
 
-  // Symbol/name fallbacks
   if (symbolComparable === q) score += 10000;
   if (name === q) score += 9000;
 
@@ -152,13 +170,6 @@ function rankAndFilterInstruments(query, instruments = [], opts = {}) {
   return typeof limit === "number" ? finalArr.slice(0, limit) : finalArr;
 }
 
-const getExchangeColor = (exchange) => {
-  const ex = (exchange || "").toString().toUpperCase();
-  if (ex === "NSE") return NSE_RED;
-  if (ex === "BSE") return BSE_BLUE;
-  return "#666";
-};
-
 const parseApiResult = (res) => {
   if (Array.isArray(res)) return res;
   if (Array.isArray(res?.data)) return res.data;
@@ -167,12 +178,124 @@ const parseApiResult = (res) => {
   return [];
 };
 
-const SearchScreen = () => {
+// --- Price formatting helper ---
+export function formatPrice(inst, lastPrice) {
+  const isNFO = inst.isDeriv === true || getExchange(inst) === "NFO";
+  if (lastPrice === null || lastPrice === undefined || lastPrice === "—") return "—";
+  if (isNFO) return `${lastPrice}`;
+  return `₹ ${lastPrice}`;
+}
+
+// --- ExchangeTag component ---
+export function ExchangeTag({ exchange, theme }) {
+  if (exchange === "NFO") return null;
+  const isDark = theme.mode === 'dark';
+  let bgColor, borderColor, textColor;
+  if (exchange === "NSE") {
+    bgColor = isDark ? "rgba(255,92,92,0.12)" : "#FFEEEE";
+    borderColor = NSE_RED;
+    textColor = NSE_RED;
+  } else if (exchange === "BSE") {
+    bgColor = isDark ? "rgba(59,130,246,0.12)" : "#E9F3FF";
+    borderColor = BSE_BLUE;
+    textColor = BSE_BLUE;
+  }
+  return (
+    <View
+      style={{
+        backgroundColor: bgColor,
+        borderWidth: 1,
+        borderColor,
+        borderRadius: 8,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        marginLeft: 8,
+        alignSelf: 'center',
+      }}
+      accessible
+      accessibilityLabel={`Exchange: ${exchange}`}
+    >
+      <Text style={{ fontSize: 12, color: textColor, fontWeight: '600' }}>{exchange}</Text>
+    </View>
+  );
+}
+
+ExchangeTag.propTypes = {
+  exchange: PropTypes.string,
+  theme: PropTypes.object.isRequired,
+};
+
+// --- Row component ---
+function InstrumentRow({ instrument, price, onPress, theme }) {
+  const ex = getExchange(instrument);
+  const showTag = !(instrument.isDeriv === true || ex === "NFO");
+  const [pressed, setPressed] = useState(false);
+  const rowBg = pressed
+    ? (theme.mode === 'dark'
+        ? theme.brand + '22'
+        : theme.brand + '11')
+    : theme.card;
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      style={[
+        styles.item,
+        {
+          backgroundColor: rowBg,
+          borderBottomColor: theme.divider,
+        }
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={`${getName(instrument)}, ${showTag ? ex : ''}, Price ${formatPrice(instrument, price)}`}
+    >
+      {/* Left: Name + Tag */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+        <Text
+          style={[
+            styles.instrumentName,
+            { color: theme.text, fontWeight: '600' },
+          ]}
+          numberOfLines={1}
+        >
+          {formatInstrumentName(instrument) || getSymbolRaw(instrument)}
+        </Text>
+        {showTag && <ExchangeTag exchange={ex} theme={theme} />}
+      </View>
+      {/* Right: Price */}
+      <View style={{ minWidth: 64, alignItems: 'flex-end', justifyContent: 'center' }}>
+        <Text
+          style={[
+            styles.priceText,
+            { color: theme.text, fontWeight: '700' },
+          ]}
+          numberOfLines={1}
+        >
+          {formatPrice(instrument, price)}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+InstrumentRow.propTypes = {
+  instrument: PropTypes.object.isRequired,
+  price: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  onPress: PropTypes.func.isRequired,
+  theme: PropTypes.object.isRequired,
+};
+
+// --- Main SearchScreen ---
+const SearchScreen = ({ onSelect }) => {
   const [query, setQuery] = useState('');
   const [rawResults, setRawResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigation = useNavigation();
+  const theme = useTheme();
 
   const rankedResults = useMemo(() => {
     return rankAndFilterInstruments(query, rawResults, {
@@ -181,12 +304,10 @@ const SearchScreen = () => {
     });
   }, [query, rawResults]);
 
-  // Live prices for top 20
   const tokens = useMemo(
     () => rankedResults.slice(0, 20).map(inst => String(inst.instrument_token ?? inst.token ?? "")).filter(Boolean),
     [rankedResults]
   );
-  const livePrices = useLivePrices(tokens);
 
   const debounceRef = useRef(null);
   const triggerSearch = () => {
@@ -212,7 +333,11 @@ const SearchScreen = () => {
   };
 
   const handleInstrumentPress = (instrument) => {
-    navigation.navigate("InstrumentDetailScreen", { instrument });
+    if (typeof onSelect === 'function') {
+      onSelect(instrument);
+    } else {
+      navigation.navigate("InstrumentDetailScreen", { instrument });
+    }
   };
 
   const onChangeQuery = (text) => {
@@ -220,58 +345,44 @@ const SearchScreen = () => {
     triggerSearch();
   };
 
-  const renderItem = ({ item, index }) => {
-    const ex = getExchange(item);
-    const sym = getSymbolRaw(item);
-    const displayName = formatInstrumentName(item);
-    const token = String(item.instrument_token ?? item.token ?? index);
-    const rawPrice =
-      livePrices && livePrices[token] !== undefined
-        ? livePrices[token]
-        : item.last_price ?? item.close ?? "—";
-    const price = rawPrice === "—" ? "—" : Number(rawPrice);
+  const ResultsList = React.useCallback(() => {
+    const livePrices = useLivePrices(tokens);
 
-    const secondary = [sym, getName(item)].filter(Boolean).join(" • ");
+    const renderItem = ({ item, index }) => {
+      const token = String(item.instrument_token ?? item.token ?? index);
+      const priceObj = livePrices && livePrices[token];
+
+      const rawPrice =
+        priceObj && priceObj.price !== undefined && priceObj.price !== null
+          ? priceObj.price
+          : item.last_price ?? item.close ?? "—";
+      const price =
+        rawPrice === "—" || rawPrice === undefined || rawPrice === null
+          ? "—"
+          : Number(rawPrice);
+
+      return (
+        <InstrumentRow
+          instrument={item}
+          price={price}
+          onPress={() => handleInstrumentPress(item)}
+          theme={theme}
+        />
+      );
+    };
+
+    if (loading) {
+      return (
+        <FlatList
+          data={[1, 2, 3, 4, 5]}
+          keyExtractor={i => String(i)}
+          renderItem={() => <SkeletonRow theme={theme} />}
+          keyboardShouldPersistTaps="handled"
+        />
+      );
+    }
 
     return (
-      <TouchableOpacity
-        style={styles.item}
-        onPress={() => handleInstrumentPress(item)}
-      >
-        <View style={{ flexDirection: "column", flex: 1 }}>
-          <Text style={styles.symbol}>
-            {displayName || sym}
-            {!!ex && (
-              <Text style={[styles.exchange, { color: getExchangeColor(ex) }]}>
-                {`  - ${ex}`}
-              </Text>
-            )}
-          </Text>
-          {!!secondary && <Text style={styles.meta}>{secondary}</Text>}
-        </View>
-        <Text style={styles.price}>{price === "—" ? "—" : `₹${price}`}</Text>
-      </TouchableOpacity>
-    );
-  };
-
-  return (
-    <View style={styles.container}>
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-        <Text style={styles.backText}>{"←"}</Text>
-      </TouchableOpacity>
-      <Text style={styles.title}>Search instrument</Text>
-      <TextInput
-        style={styles.input}
-        value={query}
-        onChangeText={onChangeQuery}
-        placeholder="Search instrument (e.g., NIFTY 09th SEP 22600 CE, RELIANCE)…"
-        autoCapitalize="none"
-        returnKeyType="search"
-        onSubmitEditing={handleSearch}
-      />
-      <Button title="Search" onPress={handleSearch} />
-      {loading && <ActivityIndicator style={{ marginTop: 10 }} />}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
       <FlatList
         data={rankedResults}
         keyExtractor={(item, idx) =>
@@ -281,18 +392,49 @@ const SearchScreen = () => {
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           !loading && (
-            <Text style={{ marginTop: 20, color: "#888" }}>
+            <Text style={{ marginTop: 20, color: theme.textDim || "#888" }}>
               No instruments found.
             </Text>
           )
         }
+        contentContainerStyle={{ paddingBottom: 24 }}
       />
+    );
+  }, [rankedResults, tokens, loading, navigation, theme, onSelect]);
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} accessibilityRole="button">
+        <Text style={[styles.backText, { color: theme.text }]}>{"←"}</Text>
+      </TouchableOpacity>
+      <Text style={[styles.title, { color: theme.text }]}>Search instrument</Text>
+      <TextInput
+        style={[styles.input, { color: theme.text, backgroundColor: theme.card, borderColor: theme.divider }]}
+        value={query}
+        onChangeText={onChangeQuery}
+        placeholder="Search instrument (e.g., NIFTY 09th SEP 22600 CE, RELIANCE)…"
+        autoCapitalize="none"
+        placeholderTextColor={theme.textDim || "#888"}
+        returnKeyType="search"
+        onSubmitEditing={handleSearch}
+      />
+      <Button title="Search" onPress={handleSearch} color={theme.brand} />
+      {loading && <ActivityIndicator style={{ marginTop: 10 }} color={theme.brand} />}
+      {error ? <Text style={[styles.error, { color: theme.error || "red" }]}>{error}</Text> : null}
+
+      <LivePriceProvider tokens={tokens}>
+        <ResultsList />
+      </LivePriceProvider>
     </View>
   );
 };
 
+SearchScreen.propTypes = {
+  onSelect: PropTypes.func,
+};
+
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#fff" },
+  container: { flex: 1, padding: 16 },
   backButton: {
     position: 'absolute',
     left: 10,
@@ -302,25 +444,33 @@ const styles = StyleSheet.create({
   },
   backText: {
     fontSize: 28,
-    color: "#222",
     fontWeight: "bold",
   },
   title: { fontSize: 22, fontWeight: "bold", marginBottom: 12, alignSelf: 'center', marginTop: 10 },
-  input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 5, padding: 8, marginBottom: 8, marginTop: 10 },
-  error: { color: "red", marginBottom: 8 },
+  input: { borderWidth: 1, borderRadius: 5, padding: 8, marginBottom: 8, marginTop: 10 },
+  error: { marginBottom: 8 },
   item: {
     paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderBottomColor: "#eee",
-    borderBottomWidth: 1,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  symbol: { fontSize: 15, fontWeight: "bold", color: "#111" },
-  exchange: { fontSize: 15, fontWeight: "bold" },
-  meta: { fontSize: 12.5, color: "#666", marginTop: 2 },
-  price: { fontSize: 15, color: "#1e90ff", marginLeft: 10 },
+  instrumentName: {
+    fontSize: 17,
+    flexShrink: 1,
+  },
+  priceText: {
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  skelBox: {
+    borderRadius: 6,
+    opacity: 0.25,
+    marginVertical: 2,
+  },
 });
 
 export default SearchScreen;

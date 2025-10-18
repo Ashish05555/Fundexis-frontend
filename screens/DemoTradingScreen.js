@@ -1167,11 +1167,6 @@ export default function DemoTradingScreen() {
                       </Text>
                     )}
                   </View>
-
-                  <Text style={[styles.price, { color: theme.text }]}>
-                    {typeof priceVal === "number" && !isNaN(priceVal)
-                      ? formatPriceForRow(item, priceVal)
-                      : "—"}
                   <Text style={styles.price}>
                     {typeof priceVal === "number" && !isNaN(priceVal) ? `₹${priceVal}` : "—"}
                   </Text>

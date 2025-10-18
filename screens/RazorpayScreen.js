@@ -23,6 +23,8 @@ const loadRazorpayScript = () => {
   });
 };
 
+const API_BASE = "https://fundexis-backend-758832599619.us-central1.run.app";
+
 export default function RazorpayScreen() {
   const navigation = useNavigation();
   const { challenge } = useRoute().params;
@@ -42,7 +44,7 @@ export default function RazorpayScreen() {
     try {
       const amountToSend = challenge.fee * 100; // fee is in rupees, Razorpay needs paise
       // 1. Create order on backend
-      const res = await fetch("http://localhost:5000/api/payment/create-order", {
+      const res = await fetch(`${API_BASE}/api/payment/create-order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -66,7 +68,7 @@ export default function RazorpayScreen() {
           return;
         }
         const options = {
-          key: "rzp_test_RIyWAiwnaoEpzI",
+          key: "rzp_live_RKeiX5h2puX8ZI", // <-- PUT YOUR LIVE KEY HERE
           amount: order.amount,
           currency: "INR",
           name: "Fundexis",
@@ -74,7 +76,7 @@ export default function RazorpayScreen() {
           order_id: order.id,
           handler: async function (response) {
             setLoading(true);
-            const verifyRes = await fetch("http://localhost:5000/api/payment/verify-razorpay", {
+            const verifyRes = await fetch(`${API_BASE}/api/payment/verify-razorpay`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -114,7 +116,7 @@ export default function RazorpayScreen() {
           description: `Purchase ${challenge.title}`,
           image: "https://fundexis.in/logo192.png",
           currency: "INR",
-          key: "rzp_test_RIyWAiwnaoEpzI",
+          key: "rzp_live_RKeiX5h2puX8ZI", // <-- PUT YOUR LIVE KEY HERE
           amount: order.amount,
           order_id: order.id,
           name: "Fundexis",
@@ -127,7 +129,7 @@ export default function RazorpayScreen() {
         RazorpayCheckout.open(options)
           .then(async data => {
             setLoading(true);
-            const verifyRes = await fetch("http://localhost:5000/api/payment/verify-razorpay", {
+            const verifyRes = await fetch(`${API_BASE}/api/payment/verify-razorpay`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
