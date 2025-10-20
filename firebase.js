@@ -6,26 +6,37 @@ import {
   onAuthStateChanged 
 } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getAnalytics } from "firebase/analytics";
 
-// Your Firebase config
+// --- Firebase Config: Make sure this matches your Firebase Console exactly ---
 const firebaseConfig = {
-  apiKey: "AIzaSyBD4eZqj59sDBCY1kcSqFKYfg2gUIN24KE",
-  authDomain: "fundexis-ea0b5.firebaseapp.com",
-  projectId: "fundexis-ea0b5",
-  storageBucket: "fundexis-ea0b5.appspot.com",
-  messagingSenderId: "758832599619",
-  appId: "1:758832599619:web:d152b8c512dadde0367af6",
-  measurementId: "G-13R0BSNZ5B"
+  apiKey: "AIzaSyD70X877hpb-7x0Q97h4-DwViSxrwz6Gzo",
+  authDomain: "fundexis-app-75223.firebaseapp.com",
+  projectId: "fundexis-app-75223",
+  storageBucket: "fundexis-app-75223.appspot.com",
+  messagingSenderId: "866869994499",
+  appId: "1:866869994499:web:beef6543cb425265ddda36",
+  measurementId: "G-JD1TY81QYG"
 };
 
-// Initialize app only once
+// --- Initialize App: Only once ---
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize auth & Firestore
+// --- Initialize Firebase Services ---
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Set persistence before any auth actions
+// --- Optionally Enable Analytics (works only in production on https) ---
+let analytics;
+if (typeof window !== "undefined" && window.location.protocol === "https:") {
+  try {
+    analytics = getAnalytics(app);
+  } catch (e) {
+    console.warn("Analytics not initialized:", e);
+  }
+}
+
+// --- Set Persistence BEFORE Any Auth Actions ---
 setPersistence(auth, browserLocalPersistence)
   .then(() => {
     console.log("Auth persistence set to local storage");
@@ -34,7 +45,7 @@ setPersistence(auth, browserLocalPersistence)
     console.error("Error setting persistence:", error);
   });
 
-// Helper: Wait until Firebase Auth is initialized before running your signup logic
+// --- Helper: Wait Until Firebase Auth is Initialized ---
 const waitForAuthInit = () => {
   return new Promise((resolve) => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -44,4 +55,17 @@ const waitForAuthInit = () => {
   });
 };
 
-export { app, auth, db, waitForAuthInit };
+// --- Debug: Log Firebase Connection Status ---
+if (typeof window !== "undefined") {
+  window.firebaseStatus = {
+    config: firebaseConfig,
+    connected: !!app,
+    analyticsEnabled: !!analytics,
+    firestore: !!db,
+    auth: !!auth
+  };
+  console.log("Firebase status:", window.firebaseStatus);
+}
+
+// --- Export Services ---
+export { app, auth, db, analytics, waitForAuthInit };

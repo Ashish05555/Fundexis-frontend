@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Firebase Test</title>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyD70X877hpb-7x0Q97h4-DwViSxrwz6Gzo",
+      authDomain: "fundexis-app-75223.firebaseapp.com",
+      projectId: "fundexis-app-75223",
+      storageBucket: "fundexis-app-75223.appspot.com",
+      messagingSenderId: "866869994499",
+      appId: "1:866869994499:web:beef6543cb425265ddda36",
+      measurementId: "G-JD1TY81QYG"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    db.collection("test").add({hello: "world"})
+      .then(() => alert("Success!"))
+      .catch(e => alert("ERROR: " + e));
+  </script>
+</body>
+</html>
