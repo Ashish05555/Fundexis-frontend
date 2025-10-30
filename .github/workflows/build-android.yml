@@ -1,3 +1,5 @@
+# Trigger workflow run
+
 name: Build Android AAB with Expo EAS
 
 on:
@@ -23,14 +25,13 @@ jobs:
       - name: Install EAS CLI
         run: npm install -g eas-cli
 
-      - name: Log in to Expo
-        run: eas whoami || eas login --token ${{ secrets.EXPO_TOKEN }}
-
       - name: Install dependencies
         run: npm ci
 
       - name: Build Android AAB
         run: eas build -p android --profile production --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       - name: Upload AAB as artifact
         uses: actions/upload-artifact@v4
