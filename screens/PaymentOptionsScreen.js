@@ -4,14 +4,14 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
 const THEME = {
-  background: "#fff",
-  card: "#f4f7ff",
+  background: "#2540F6",      // Blue header background
+  card: "#fff",
   text: "#232323",
   muted: "#888",
   brand: "#2540F6",
   accent: "#1ed760",
-  razorpay: "#2540F6",
-  googlePlay: "#2540F6",
+  shadow: "#2540F6",
+  secure: "#16c784",
 };
 
 export default function PaymentOptionsScreen() {
@@ -26,19 +26,21 @@ export default function PaymentOptionsScreen() {
       key: "razorpay",
       label: "Razorpay",
       icon: (
-        <MaterialCommunityIcons name="bank" size={32} color={THEME.razorpay} />
+        <MaterialCommunityIcons name="bank" size={34} color={THEME.brand} />
       ),
+      subtitle: "UPI, Cards & More",
       button: "Continue with Razorpay",
-      color: THEME.razorpay,
+      color: THEME.brand,
     },
     {
       key: "google",
       label: "Google Play",
       icon: (
-        <MaterialCommunityIcons name="google-play" size={32} color={"#4285F4"} />
+        <MaterialCommunityIcons name="google-play" size={34} color={THEME.brand} />
       ),
+      subtitle: "Play balance",
       button: "Continue with Google Play",
-      color: THEME.googlePlay,
+      color: THEME.brand,
     },
   ];
 
@@ -51,178 +53,304 @@ export default function PaymentOptionsScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: THEME.background }}>
-      <View style={styles.headerBar}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={28} color={THEME.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Checkout</Text>
-        <View style={{ width: 28 }} />
-      </View>
-
-      <View style={styles.challengeCard}>
-        <MaterialCommunityIcons name="trophy-award" size={38} color={THEME.brand} style={{ marginRight: 14 }} />
-        <View>
-          <Text style={styles.challengeTitle}>{challenge.title}</Text>
-          <Text style={styles.challengeSubtitle}>
-            Funding: <Text style={{ color: THEME.text, fontWeight: "bold" }}>₹{challenge.funding.toLocaleString()}</Text>
-          </Text>
-          <Text style={styles.challengeSubtitle}>
-            Fee: <Text style={{ color: THEME.text, fontWeight: "bold" }}>₹{challenge.fee.toLocaleString()}</Text>
-          </Text>
+    <SafeAreaView style={styles.safe}>
+      {/* Blue header background */}
+      <View style={styles.headerBg}>
+        <View style={styles.headerBar}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Ionicons name="chevron-back" size={25} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Checkout</Text>
+          <View style={{ width: 25 }} />
         </View>
       </View>
 
-      <Text style={styles.sectionTitle}>Choose how to pay</Text>
-      <Text style={styles.sectionSubtitle}>
-        You can pay directly through Razorpay or using your Google Play account.
-      </Text>
+      {/* Main card attached below header */}
+      <View style={styles.mainCard}>
+        {/* Challenge Card (section) */}
+        <View style={styles.challengeCard}>
+          <View style={styles.challengeIconWrap}>
+            <MaterialCommunityIcons name="star" size={26} color={THEME.brand} />
+          </View>
+          <View style={styles.challengeInfo}>
+            <Text style={styles.challengeTitle}>{challenge.title}</Text>
+            <View style={styles.challengeRow}>
+              <Text style={styles.challengeMeta}>Funding</Text>
+              <Text style={styles.challengeAmount}>₹{challenge.funding.toLocaleString()}</Text>
+            </View>
+            <View style={styles.challengeRow}>
+              <Text style={styles.challengeMeta}>Fee</Text>
+              <Text style={styles.challengeAmount}>₹{challenge.fee.toLocaleString()}</Text>
+            </View>
+          </View>
+        </View>
 
-      <View style={styles.optionsRow}>
-        {paymentMethods.map((method) => (
-          <TouchableOpacity
-            key={method.key}
-            style={[
-              styles.methodCard,
-              {
-                borderColor: selected === method.key ? THEME.brand : "#e0e0e0",
-                backgroundColor: selected === method.key ? "#f7faff" : THEME.card,
-              },
-            ]}
-            onPress={() => setSelected(method.key)}
-            activeOpacity={0.85}
-          >
-            {method.icon}
-            <Text
+        {/* Payment Section */}
+        <Text style={styles.sectionTitle}>Choose how to pay</Text>
+        <Text style={styles.sectionSubtitle}>
+          You can pay directly through Razorpay or using your Google Play account.
+        </Text>
+
+        <View style={styles.optionsRow}>
+          {paymentMethods.map((method) => (
+            <TouchableOpacity
+              key={method.key}
               style={[
-                styles.methodLabel,
-                { color: selected === method.key ? THEME.brand : THEME.text },
+                styles.methodCard,
+                selected === method.key && styles.methodCardActive,
               ]}
+              onPress={() => setSelected(method.key)}
+              activeOpacity={0.9}
             >
-              {method.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+              <View style={styles.methodIcon}>{method.icon}</View>
+              <Text
+                style={[
+                  styles.methodLabel,
+                  selected === method.key && styles.methodLabelActive,
+                ]}
+              >
+                {method.label}
+              </Text>
+              <Text style={styles.methodSubtitle}>{method.subtitle}</Text>
+              {selected === method.key && (
+                <MaterialCommunityIcons
+                  name="check-circle"
+                  size={20}
+                  color={THEME.brand}
+                  style={styles.checkIcon}
+                />
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
 
-      <TouchableOpacity
-        style={[
-          styles.continueBtn,
-          { backgroundColor: THEME.brand }
-        ]}
-        onPress={handleContinue}
-      >
-        <Text style={styles.continueBtnText}>
-          {paymentMethods.find((m) => m.key === selected).button}
-        </Text>
-      </TouchableOpacity>
-
-      <View style={styles.legalBox}>
-        <Text style={styles.legalText}>
-          You'll finish your purchase with{" "}
-          <Text style={{ fontWeight: "bold", color: THEME.brand }}>
-            {selected === "razorpay" ? "Razorpay" : "Google Play"}
+        {/* Secure Payment Info */}
+        <View style={styles.securePaymentRow}>
+          <MaterialCommunityIcons
+            name="shield-check"
+            size={18}
+            color={THEME.secure}
+            style={{ marginRight: 7 }}
+          />
+          <Text style={styles.secureText}>
+            Secure Payment. Your payment information is encrypted and secure. We never store your card details.
           </Text>
-          . Fees and taxes may apply.
-        </Text>
+        </View>
+
+        {/* Continue Button */}
+        <TouchableOpacity
+          style={[
+            styles.continueBtn,
+            { backgroundColor: THEME.brand }
+          ]}
+          onPress={handleContinue}
+        >
+          <Text style={styles.continueBtnText}>
+            {paymentMethods.find((m) => m.key === selected).button}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Legal */}
+        <View style={styles.legalBox}>
+          <Text style={styles.legalText}>
+            You'll finish your purchase with{" "}
+            <Text style={{ fontWeight: "bold", color: THEME.brand }}>
+              {selected === "razorpay" ? "Razorpay" : "Google Play"}
+            </Text>
+            . Fees and taxes may apply.
+          </Text>
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: THEME.background,
+  },
+  headerBg: {
+    backgroundColor: THEME.background,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    paddingBottom: 8,
+  },
   headerBar: {
     flexDirection: "row",
     alignItems: "center",
-    paddingTop: 5,
-    paddingHorizontal: 3,
-    paddingBottom: 7,
-    backgroundColor: "#fff",
-    marginBottom: 4,
-    borderBottomWidth: 0.5,
-    borderBottomColor: "#eaeaea",
+    paddingTop: 22,
+    paddingHorizontal: 18,
+    paddingBottom: 9,
+    backgroundColor: "transparent",
   },
   backBtn: {
-    padding: 8,
-    marginRight: 2,
+    padding: 7,
+    marginRight: 1,
   },
   headerTitle: {
     flex: 1,
     textAlign: "center",
-    color: "#232323",
-    fontSize: 22,
+    color: "#fff",
+    fontSize: 21,
     fontWeight: "700",
     letterSpacing: 0.2,
+  },
+  mainCard: {
+    flex: 1,
+    backgroundColor: THEME.card,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingBottom: 16,
+    paddingHorizontal: 0,
+    marginTop: -12,
+    shadowColor: "#2540F6",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.14,
+    shadowRadius: 20,
+    elevation: 8,
   },
   challengeCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#f4f7ff",
-    borderRadius: 18,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#dbeafe",
     marginHorizontal: 20,
     marginTop: 18,
     marginBottom: 8,
     padding: 18,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 7,
-    shadowOffset: { width: 1, height: 4 },
+    shadowColor: "#e3ebff",
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+  },
+  challengeIconWrap: {
+    backgroundColor: "#f0f4ff",
+    borderRadius: 12,
+    padding: 10,
+    marginRight: 13,
+  },
+  challengeInfo: {
+    flex: 1,
   },
   challengeTitle: {
     fontSize: 18,
-    fontWeight: "bold",
+    fontWeight: "700",
     color: "#232323",
     marginBottom: 2,
   },
-  challengeSubtitle: {
-    fontSize: 14,
-    color: "#888",
+  challengeRow: {
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 1,
   },
+  challengeMeta: {
+    fontSize: 14,
+    color: "#888",
+    fontWeight: "500",
+    marginRight: 7,
+  },
+  challengeAmount: {
+    fontSize: 15,
+    color: "#232323",
+    fontWeight: "700",
+  },
+
   sectionTitle: {
     marginLeft: 20,
     marginTop: 18,
-    fontSize: 17,
-    fontWeight: "bold",
+    fontSize: 16,
+    fontWeight: "700",
     color: "#232323",
-    marginBottom: 2,
+    marginBottom: 3,
   },
   sectionSubtitle: {
     marginLeft: 20,
     fontSize: 13,
     color: "#8a8a8a",
     marginBottom: 12,
+    marginTop: 2,
   },
   optionsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginHorizontal: 18,
-    marginBottom: 18,
+    marginBottom: 22,
     marginTop: 4,
+    gap: 10,
   },
   methodCard: {
     flex: 1,
     alignItems: "center",
-    paddingVertical: 19,
-    borderRadius: 15,
-    borderWidth: 2.3,
-    marginHorizontal: 4,
-    backgroundColor: "#f4f7ff",
+    paddingVertical: 24,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: "#e0e5ef",
+    backgroundColor: "#fff",
+    marginHorizontal: 2,
+    shadowColor: "#e3ebff",
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
+    position: "relative",
+  },
+  methodCardActive: {
+    borderColor: "#2540F6",
+    backgroundColor: "#f7faff",
+  },
+  methodIcon: {
+    marginBottom: 7,
   },
   methodLabel: {
-    marginTop: 10,
     fontSize: 16,
     fontWeight: "700",
     letterSpacing: 0.3,
+    color: "#232323",
+    marginBottom: 3,
+  },
+  methodLabelActive: {
+    color: "#2540F6",
+  },
+  methodSubtitle: {
+    fontSize: 13,
+    color: "#888",
+    fontWeight: "500",
+    marginBottom: 3,
+  },
+  checkIcon: {
+    position: "absolute",
+    bottom: 12,
+    right: 12,
+  },
+
+  securePaymentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 22,
+    marginBottom: 8,
+  },
+  secureText: {
+    fontSize: 12.5,
+    color: "#16c784",
+    fontWeight: "600",
   },
   continueBtn: {
-    marginTop: 6,
-    marginHorizontal: 18,
+    marginTop: 10,
+    marginHorizontal: 20,
     paddingVertical: 16,
     borderRadius: 30,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
+    elevation: 2,
+    shadowColor: "#e3ebff",
+    shadowOpacity: 0.09,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
   },
   continueBtnText: {
     color: "#fff",
@@ -231,9 +359,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.25,
   },
   legalBox: {
-    marginHorizontal: 22,
+    marginHorizontal: 20,
     paddingHorizontal: 3,
-    marginTop: 12,
+    marginTop: 16,
   },
   legalText: {
     fontSize: 12.2,

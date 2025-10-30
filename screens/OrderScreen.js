@@ -8,23 +8,32 @@ import {
   ScrollView,
   ActivityIndicator,
   Switch,
+  Platform,
   Modal,
 } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import instrumentsData from "../data/instruments.json";
-import { useLivePrice } from "../context/LivePriceProvider";
 import { useTheme } from "../context/ThemeContext";
-import { useChallenge } from "../context/ChallengeContext";
-import { auth, db } from "../firebase";
-import { collection, addDoc, doc, updateDoc, deleteField } from "firebase/firestore";
-import { executeOrderAndCreateTrade } from "../services/executeTrade";
 import { getAllowedProducts } from "../utils/instrumentRules";
+import useRestLivePrices from "../hooks/useRestLivePrices";
+import { db } from "../firebase";
+import { auth } from "../firebase";
+import { doc, collection, addDoc, serverTimestamp } from "firebase/firestore";
 
 const ORDER_TYPES = ["MARKET", "LIMIT"];
 const VARIETIES = ["REGULAR", "AMO"];
 
-// --- Helpers ---
+// Utility to check if market is open (NSE: 09:15-15:30 IST)
+function isMarketOpen() {
+  const now = new Date();
+  const hours = now.getHours();
+  const mins = now.getMinutes();
+  // Market open 09:15 <= time < 15:30
+  const open = (hours > 9 || (hours === 9 && mins >= 15)) && (hours < 15 || (hours === 15 && mins < 30));
+  return open;
+}
+
 function extractPrice(val) {
   if (typeof val === "number") return val;
   if (val && typeof val === "object") {
@@ -34,25 +43,6 @@ function extractPrice(val) {
   }
   return undefined;
 }
-function removeUndefined(obj) {
-  if (Array.isArray(obj)) return obj.map(removeUndefined);
-  if (obj && typeof obj === "object") {
-    return Object.fromEntries(
-      Object.entries(obj)
-        .filter(([, v]) => v !== undefined)
-        .map(([k, v]) => [k, removeUndefined(v)])
-    );
-  }
-  return obj;
-}
-function isTickMultiple(price, tickSize) {
-  return Math.abs(price / tickSize - Math.round(price / tickSize)) < 1e-8;
-}
-function roundToTick(price, tickSize) {
-  const n = Number(price);
-  if (!Number.isFinite(n)) return n;
-  return Math.round(n / tickSize) * tickSize;
-}
 function tickDecimals(tickSize) {
   const s = String(tickSize);
   const idx = s.indexOf(".");
@@ -61,31 +51,6 @@ function tickDecimals(tickSize) {
 function fmtToTick(n, tickSize) {
   if (!Number.isFinite(n)) return "";
   return n.toFixed(tickDecimals(tickSize));
-}
-function getDemoAccountType(challenge) {
-  if (challenge?.type && ["1L", "5L", "10L"].includes(challenge.type)) return challenge.type;
-  if (challenge?.title) {
-    if (challenge.title.includes("1L")) return "1L";
-    if (challenge.title.includes("5L")) return "5L";
-    if (challenge.title.includes("10L")) return "10L";
-  }
-  return undefined;
-}
-function isMarketOpen() {
-  const now = new Date();
-  const d = now.getDay();
-  const h = now.getHours();
-  const m = now.getMinutes();
-  const wd = d >= 1 && d <= 5;
-  const afterOpen = h > 9 || (h === 9 && m >= 15);
-  const beforeClose = h < 15 || (h === 15 && m < 30);
-  return wd && afterOpen && beforeClose;
-}
-function isMarketableLimit({ side, limitPrice, refPrice }) {
-  if (!limitPrice || !refPrice) return false;
-  if (side === "BUY") return limitPrice >= refPrice;
-  if (side === "SELL") return limitPrice <= refPrice;
-  return false;
 }
 function zerodhaBrokerage({ product, price, quantity }) {
   if (product === "NRML") return 0;
@@ -97,7 +62,16 @@ function zerodhaMargin({ product, price, quantity }) {
   if (product === "MIS") return turnover / 5;
   return turnover;
 }
-
+function getDemoAccountType(challenge) {
+  if (challenge?.type && ["1L", "5L", "10L"].includes(challenge.type)) return challenge.type;
+  if (challenge?.challengeType && ["1L", "5L", "10L"].includes(challenge.challengeType)) return challenge.challengeType;
+  if (challenge?.title) {
+    if (challenge.title.includes("1L")) return "1L";
+    if (challenge.title.includes("5L")) return "5L";
+    if (challenge.title.includes("10L")) return "10L";
+  }
+  return undefined;
+}
 function lookupTokenBySymbol(sym) {
   if (!sym) return undefined;
   const u = String(sym).toUpperCase();
@@ -122,11 +96,51 @@ function resolveInstrumentToken(instrument, order) {
   return undefined;
 }
 
+// Firestore Order Save
+async function placeOrderAPI(orderDetails) {
+  if (!orderDetails.challengeId || !orderDetails.userId) {
+    return { success: false, message: "Missing challenge or user info" };
+  }
+  try {
+    // Clean order details: remove undefineds, ensure symbol and other fields are strings
+    const cleanOrderDetails = { ...orderDetails };
+    cleanOrderDetails.symbol =
+      orderDetails.symbol ||
+      orderDetails.tradingsymbol ||
+      orderDetails.instrument_name ||
+      "";
+    Object.keys(cleanOrderDetails).forEach((key) => {
+      if (cleanOrderDetails[key] === undefined) cleanOrderDetails[key] = null;
+    });
+
+    const ordersCollection = collection(
+      db,
+      "users",
+      orderDetails.userId,
+      "challenges",
+      orderDetails.challengeId,
+      "orders"
+    );
+    await addDoc(ordersCollection, {
+      ...cleanOrderDetails,
+      createdAt: serverTimestamp(),
+      status: "open",
+      variety: orderDetails.variety,
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, message: e.message || "Order save failed" };
+  }
+}
+
 export default function OrderScreen() {
   const { theme } = useTheme();
   const route = useRoute();
   const navigation = useNavigation();
-  const contextChallenge = useChallenge().selectedChallenge;
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
   const {
     instrument: instrumentParam,
@@ -138,33 +152,15 @@ export default function OrderScreen() {
 
   const modifyMode = !!orderFromModify?.id;
   const instrument = instrumentParam || orderFromModify?.instrument || orderFromModify || {};
-  const challenge = challengeParam || contextChallenge;
+  const challenge = challengeParam;
   const demoAccountType = demoAccountTypeParam || getDemoAccountType(challenge);
-
-  useLayoutEffect(() => {
-    navigation.setOptions({ headerBackVisible: false, headerLeft: () => null });
-  }, [navigation]);
-
-  const [showConfirmation, setShowConfirmation] = useState(false);
-
-  if (!instrument || Object.keys(instrument).length === 0) {
-    return (
-      <View style={[styles.container, { backgroundColor: theme.background }]}>
-        <Text style={{ color: theme.error, marginTop: 50 }}>Instrument data not found.</Text>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 30, alignSelf: "center" }}>
-          <Text style={{ color: theme.brand, fontWeight: "bold" }}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
 
   const productOptions = useMemo(() => {
     const meta = {
       exchange: instrument.exchange ?? instrument.segment,
       segment: instrument.segment ?? instrument.instrument_type,
       instrument_type: instrument.instrument_type,
-      trading_symbol:
-        instrument.trading_symbol ?? instrument.tradingsymbol ?? instrument.symbol,
+      trading_symbol: instrument.trading_symbol ?? instrument.tradingsymbol ?? instrument.symbol,
       symbol: instrument.symbol ?? instrument.tradingsymbol,
     };
     return getAllowedProducts(meta);
@@ -175,11 +171,9 @@ export default function OrderScreen() {
       String(orderFromModify?.transaction_type || orderFromModify?.side || "BUY").toUpperCase()
   );
   const [quantity, setQuantity] = useState(modifyMode ? String(orderFromModify.quantity || 1) : "1");
-
   const existingType = String(orderFromModify?.order_type || orderFromModify?.type || "MARKET").toUpperCase();
   const existingIsStop = existingType === "STOP_LIMIT" || orderFromModify?.trigger_price != null;
   const [orderType, setOrderType] = useState(modifyMode ? (existingIsStop ? "LIMIT" : existingType) : "MARKET");
-
   const [product, setProduct] = useState(
     modifyMode ? (orderFromModify?.product || orderFromModify?.product_type || productOptions[0]) : productOptions[0]
   );
@@ -196,24 +190,18 @@ export default function OrderScreen() {
   const [price, setPrice] = useState(
     modifyMode && !existingIsStop ? String(orderFromModify?.price ?? "") : ""
   );
-
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [showPreview, setShowPreview] = useState(false);
-  const [previewData, setPreviewData] = useState(null);
-  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
-  const [marketOpen, setMarketOpen] = useState(isMarketOpen());
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const lotSize = parseInt(instrument?.lotSize || instrument?.lot_size || 1);
   const tickSize = parseFloat(instrument?.tick_size || 0.05);
-  const circuitLimit = instrument?.circuit_limit || {};
-  const minPrice = circuitLimit.lower ?? undefined;
-  const maxPrice = circuitLimit.upper ?? undefined;
-
   const resolvedToken = useMemo(() => resolveInstrumentToken(instrument, orderFromModify), [instrument, orderFromModify]);
-  let livePriceFromFeedRaw = useLivePrice(resolvedToken);
-  let livePriceFromFeed = extractPrice(livePriceFromFeedRaw);
-
+  
+  // LIVE PRICE EVERY SECOND
+  const restPrices = useRestLivePrices(resolvedToken ? [resolvedToken] : [], 1000);
+  const livePriceFromFeed = extractPrice(restPrices[resolvedToken]);
+  
   const lastPrice = useMemo(() => {
     if (typeof livePriceFromFeed === "number" && !Number.isNaN(livePriceFromFeed)) return livePriceFromFeed;
     const o = orderFromModify || {};
@@ -233,19 +221,6 @@ export default function OrderScreen() {
     return undefined;
   }, [livePriceFromFeed, orderFromModify, instrument]);
 
-  const limitIsMarketable = useMemo(() => {
-    if (orderType !== "LIMIT" || slActive) return false;
-    return isMarketableLimit({
-      side,
-      limitPrice: parseFloat(price),
-      refPrice: typeof lastPrice === "number" ? lastPrice : undefined,
-    });
-  }, [orderType, slActive, side, price, lastPrice]);
-
-  useEffect(() => {
-    if (!productOptions.includes(product)) setProduct(productOptions[0]);
-  }, [productOptions.join("|")]);
-
   useEffect(() => {
     if (orderType === "MARKET") {
       if (typeof lastPrice === "number" && !Number.isNaN(lastPrice)) {
@@ -256,13 +231,6 @@ export default function OrderScreen() {
     }
   }, [orderType, lastPrice, tickSize]);
 
-  useEffect(() => {
-    const id = setInterval(() => setMarketOpen(isMarketOpen()), 30000);
-    setMarketOpen(isMarketOpen());
-    return () => clearInterval(id);
-  }, []);
-
-  const isAMO = variety === "AMO";
   const isInvalidLotQuantity =
     !quantity || isNaN(quantity) || parseInt(quantity) <= 0 || parseInt(quantity) % lotSize !== 0;
 
@@ -279,233 +247,11 @@ export default function OrderScreen() {
     () => zerodhaBrokerage({ product, price: effectivePrice, quantity: parseInt(quantity) || 0 }),
     [product, effectivePrice, quantity]
   );
-
-  const availableBalance = challenge?.balance || challenge?.funding || 0;
-
-  function validateOrder() {
-    if (!quantity || isNaN(quantity) || parseInt(quantity) <= 0) return "Enter a valid quantity.";
-    if (parseInt(quantity) % lotSize !== 0) return `Quantity must be a multiple of lot size (${lotSize}).`;
-    if (orderType === "MARKET") {
-      if (!(typeof lastPrice === "number" && lastPrice > 0)) return "Live price unavailable for market order.";
-      if (slActive && (!triggerPrice || isNaN(triggerPrice) || parseFloat(triggerPrice) <= 0)) return "Enter a valid Trigger price.";
-      if (slActive && !isTickMultiple(parseFloat(triggerPrice), tickSize)) return `Trigger price must be a multiple of tick size (${tickSize}).`;
-      if (slActive && minPrice && parseFloat(triggerPrice) < minPrice) return `Trigger price cannot be less than lower circuit (${minPrice}).`;
-      if (slActive && maxPrice && parseFloat(triggerPrice) > maxPrice) return `Trigger price cannot be more than upper circuit (${maxPrice}).`;
-    } else {
-      if (slActive) {
-        if (!limitPrice || isNaN(limitPrice) || parseFloat(limitPrice) <= 0) return "Enter a valid limit price.";
-        if (!triggerPrice || isNaN(triggerPrice) || parseFloat(triggerPrice) <= 0) return "Enter a valid Trigger price.";
-        if (!isTickMultiple(parseFloat(limitPrice), tickSize)) return `Limit price must be a multiple of tick size (${tickSize}).`;
-        if (!isTickMultiple(parseFloat(triggerPrice), tickSize)) return `Trigger price must be a multiple of tick size (${tickSize}).`;
-        if (minPrice && parseFloat(limitPrice) < minPrice) return `Limit price cannot be less than lower circuit (${minPrice}).`;
-        if (maxPrice && parseFloat(limitPrice) > maxPrice) return `Limit price cannot be more than upper circuit (${maxPrice}).`;
-        if (minPrice && parseFloat(triggerPrice) < minPrice) return `Trigger price cannot be less than lower circuit (${minPrice}).`;
-        if (maxPrice && parseFloat(triggerPrice) > maxPrice) return `Trigger price cannot be more than upper circuit (${maxPrice}).`;
-        if (
-          (side === "SELL" && parseFloat(triggerPrice) <= parseFloat(limitPrice)) ||
-          (side === "BUY" && parseFloat(triggerPrice) >= parseFloat(limitPrice))
-        ) {
-          return `For ${side} SL orders, trigger price should be ${side === "SELL" ? "greater" : "less"} than limit price.`;
-        }
-      } else {
-        if (!price || isNaN(price) || parseFloat(price) <= 0) return "Enter a valid limit price.";
-        if (!isTickMultiple(parseFloat(price), tickSize)) return `Price must be a multiple of tick size (${tickSize}).`;
-        if (minPrice && parseFloat(price) < minPrice) return `Price cannot be less than lower circuit (${minPrice}).`;
-        if (maxPrice && parseFloat(price) > maxPrice) return `Price cannot be more than upper circuit (${maxPrice}).`;
-      }
-    }
-    if (approxMargin > availableBalance) return "Insufficient balance for margin.";
-    if (isAMO && marketOpen) return "AMO orders can be placed only when market is closed.";
-    if (!isAMO && !marketOpen) return "Market is closed. Use AMO to schedule for next open.";
-    return "";
-  }
-
-  const willAutoUpgradeToStopLimit = useMemo(() => {
-    if (orderType !== "LIMIT" || slActive) return false;
-    const px = parseFloat(price);
-    if (!Number.isFinite(px) || !Number.isFinite(lastPrice)) return false;
-    return (side === "BUY" && px > lastPrice) || (side === "SELL" && px < lastPrice);
-  }, [orderType, slActive, side, price, lastPrice]);
-
-  const handlePreview = () => {
-    const validation = validateOrder();
-    if (validation) {
-      setErrorMsg(validation);
-      return;
-    }
-    setErrorMsg("");
-
-    const px =
-      orderType === "MARKET" ? Number(lastPrice || 0) : Number(parseFloat(slActive ? limitPrice : price) || 0);
-    const roundedPx = roundToTick(px, tickSize);
-
-    setPreviewData({
-      tradingsymbol: instrument.tradingsymbol || instrument.symbol,
-      side,
-      quantity,
-      price: roundedPx,
-      orderType: willAutoUpgradeToStopLimit ? "STOP_LIMIT (auto)" : orderType,
-      product,
-      variety,
-      marginRequired: approxMargin,
-      charges: brokerage,
-      availableBalance,
-      slActive: slActive || willAutoUpgradeToStopLimit,
-      triggerPrice: slActive ? roundToTick(parseFloat(triggerPrice), tickSize) : (willAutoUpgradeToStopLimit ? roundedPx : undefined),
-      limitPrice: slActive ? roundToTick(parseFloat(limitPrice), tickSize) : (willAutoUpgradeToStopLimit ? roundedPx : undefined),
-      autoUpgraded: willAutoUpgradeToStopLimit,
-    });
-    setShowPreview(true);
-  };
-
-  const handleSubmit = async () => {
-    setErrorMsg("");
-    setLoading(true);
-
-    if (!demoAccountType) {
-      setLoading(false);
-      setErrorMsg(`Demo account type is missing or invalid. Challenge object: ${JSON.stringify(challenge)}`);
-      return;
-    }
-    const user = auth.currentUser;
-    if (!user) {
-      setLoading(false);
-      setErrorMsg("You must be logged in.");
-      return;
-    }
-    const userId = user.uid;
-    const challengeId = challenge?.id || challenge?.challengeId || challenge?.docId;
-    if (!userId || !challengeId) {
-      setLoading(false);
-      setErrorMsg("Could not resolve userId or challengeId for order placement.");
-      return;
-    }
-
-    const typedLimit = parseFloat(price);
-    const roundedLimit = Number.isFinite(typedLimit) ? roundToTick(typedLimit, tickSize) : undefined;
-    const roundedTrigger = Number.isFinite(parseFloat(triggerPrice)) ? roundToTick(parseFloat(triggerPrice), tickSize) : undefined;
-    const roundedStopLimit = Number.isFinite(parseFloat(limitPrice)) ? roundToTick(parseFloat(limitPrice), tickSize) : undefined;
-
-    let finalType = orderType;
-    let finalSlActive = slActive;
-    let finalTrigger = slActive ? roundedTrigger : undefined;
-    let finalStopLimit = slActive ? roundedStopLimit : undefined;
-    let finalDisplayPrice =
-      orderType === "MARKET" ? Number(lastPrice || 0) : (slActive ? roundedStopLimit : roundedLimit);
-
-    if (orderType === "LIMIT" && !slActive && Number.isFinite(lastPrice) && Number.isFinite(roundedLimit)) {
-      const wantsWait = (side === "BUY" && roundedLimit > lastPrice) || (side === "SELL" && roundedLimit < lastPrice);
-      if (wantsWait) {
-        finalType = "STOP_LIMIT";
-        finalSlActive = true;
-        finalTrigger = roundedLimit;
-        finalStopLimit = roundedLimit;
-        finalDisplayPrice = roundedLimit;
-      }
-    }
-
-    const isREGULAR = variety === "REGULAR";
-
-    try {
-      if (!modifyMode) {
-        const payloadBase = {
-          tradingsymbol: instrument.tradingsymbol || instrument.symbol,
-          exchange: instrument.exchange ?? instrument.segment,
-          quantity: parseInt(quantity),
-          product,
-          variety,
-          demoAccountType,
-          transaction_type: side,
-          instrument,
-          createdAt: new Date().toISOString(),
-          slActive: !!finalSlActive,
-        };
-
-        const orderPayload = removeUndefined({
-          ...payloadBase,
-          order_type: finalType,
-          price: finalType === "MARKET" ? Number(lastPrice || 0) : (finalType === "LIMIT" ? finalDisplayPrice : undefined),
-          trigger_price: finalType === "STOP_LIMIT" ? finalTrigger : undefined,
-          stoploss_limit: finalType === "STOP_LIMIT" ? finalStopLimit : undefined,
-          price_type: finalType,
-          status: isAMO ? "SCHEDULED" : finalType === "MARKET" ? "TO_EXECUTE" : "PENDING",
-          triggered: finalType === "STOP_LIMIT" ? false : undefined,
-        });
-
-        const ordersRef = collection(db, "users", userId, "challenges", challengeId, "orders");
-        const orderDoc = await addDoc(ordersRef, orderPayload);
-        const orderId = orderDoc.id;
-
-        if (isREGULAR) {
-          if (finalType === "MARKET") {
-            await executeOrderAndCreateTrade({ userId, challengeId, orderId, ltp: lastPrice || finalDisplayPrice || 0 });
-          } else if (finalType === "LIMIT") {
-            await executeOrderAndCreateTrade({ userId, challengeId, orderId, ltp: lastPrice || 0 });
-          }
-        }
-      } else {
-        const orderId = orderFromModify.id;
-        const orderRef = doc(db, "users", userId, "challenges", challengeId, "orders", orderId);
-
-        const baseUpdate = {
-          updatedAt: new Date().toISOString(),
-          tradingsymbol: orderFromModify.tradingsymbol || instrument.tradingsymbol || instrument.symbol,
-          exchange: orderFromModify.exchange || instrument.exchange || instrument.segment,
-          transaction_type: side,
-          quantity: parseInt(quantity),
-          product,
-          variety,
-          order_type: finalType,
-          price_type: finalType,
-          slActive: !!finalSlActive,
-          status: isAMO ? "SCHEDULED" : finalType === "MARKET" ? "TO_EXECUTE" : "PENDING",
-        };
-
-        const updatePayload = { ...baseUpdate };
-        if (finalType === "STOP_LIMIT") {
-          updatePayload.trigger_price = finalTrigger;
-          updatePayload.stoploss_limit = finalStopLimit;
-          updatePayload.price = deleteField();
-          updatePayload.triggered = false;
-          updatePayload.triggeredAt = deleteField();
-        } else if (finalType === "LIMIT") {
-          updatePayload.price = finalDisplayPrice;
-          updatePayload.trigger_price = deleteField();
-          updatePayload.stoploss_limit = deleteField();
-          updatePayload.triggered = deleteField();
-          updatePayload.triggeredAt = deleteField();
-        } else if (finalType === "MARKET") {
-          updatePayload.price = Number(lastPrice || finalDisplayPrice || 0);
-          updatePayload.trigger_price = deleteField();
-          updatePayload.stoploss_limit = deleteField();
-          updatePayload.triggered = deleteField();
-          updatePayload.triggeredAt = deleteField();
-        }
-
-        await updateDoc(orderRef, removeUndefined(updatePayload));
-
-        if (isREGULAR && finalType === "MARKET") {
-          await executeOrderAndCreateTrade({
-            userId,
-            challengeId,
-            orderId,
-            ltp: lastPrice || finalDisplayPrice || 0,
-          });
-        }
-        if (isREGULAR && finalType === "LIMIT") {
-          await executeOrderAndCreateTrade({ userId, challengeId, orderId, ltp: lastPrice || 0 });
-        }
-      }
-
-      setLoading(false);
-      setShowPreview(false);
-      setShowConfirmation(true);
-    } catch (err) {
-      setLoading(false);
-      setShowPreview(false);
-      setErrorMsg(err.message || (modifyMode ? "Update failed." : "Order failed."));
-    }
-  };
+  const availableBalance = challenge?.balance != null
+    ? challenge.balance
+    : (challenge?.funding != null
+      ? challenge.funding
+      : 0);
 
   const incLot = () => setQuantity((q) => String(parseInt(q || "0") + lotSize));
   const decLot = () =>
@@ -514,355 +260,560 @@ export default function OrderScreen() {
       return nq > 0 ? String(nq) : String(lotSize);
     });
 
+  // --- VARIETY LOGIC ---
+  const marketOpen = isMarketOpen();
+  useEffect(() => {
+    if (marketOpen && variety !== "REGULAR") {
+      setVariety("REGULAR");
+    }
+    if (!marketOpen && variety !== "AMO") {
+      setVariety("AMO");
+    }
+  }, [marketOpen, variety]);
+  const allowedVarieties = marketOpen ? ["REGULAR"] : ["AMO"];
+  // --- END VARIETY LOGIC ---
+
+  // ---- PLACE ORDER LOGIC ----
+  async function handlePlaceOrder() {
+    if (!allowedVarieties.includes(variety)) return;
+    setLoading(true);
+    setErrorMsg("");
+    try {
+      const userId = auth.currentUser?.uid;
+      const challengeId = challenge?.challengeId || challenge?.id;
+      // Fix for symbol field: fallback to tradingsymbol/name if missing
+      const orderSymbol =
+        instrument.symbol ||
+        instrument.tradingsymbol ||
+        instrument.name ||
+        "";
+
+      if (!userId || !challengeId) {
+        setErrorMsg("Missing user/challenge info");
+        setLoading(false);
+        return;
+      }
+      const response = await placeOrderAPI({
+        symbol: orderSymbol,
+        tradingsymbol: instrument.tradingsymbol || "",
+        instrument_name: instrument.name || "",
+        quantity: parseInt(quantity),
+        price: effectivePrice,
+        side,
+        orderType,
+        variety,
+        product,
+        slActive,
+        triggerPrice,
+        limitPrice,
+        challengeId,
+        userId,
+      });
+      if (response.success) {
+        setShowSuccessModal(true);
+        setTimeout(() => setShowSuccessModal(false), 1200);
+      } else {
+        setErrorMsg(response.message || "Order failed");
+      }
+    } catch (e) {
+      setErrorMsg("Order failed: " + (e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+  // ---------------------------
+
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={{ paddingBottom: 30 }}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={28} color={theme.brand} />
-        </TouchableOpacity>
-        <Text style={[styles.ticker, { color: theme.brand }]}>{instrument.tradingsymbol || instrument.symbol}</Text>
-        <Text style={[styles.priceHeader, { color: theme.brand }]}>
-          {typeof lastPrice === "number" && !Number.isNaN(lastPrice) ? fmtToTick(lastPrice, tickSize) : <ActivityIndicator size="small" />}
-        </Text>
-      </View>
-
-      <View style={styles.sideRow}>
-        <Text style={[styles.sideLabel, { color: side === "BUY" ? theme.brand : theme.error }]}>{side === "BUY" ? "Buy" : "Sell"}</Text>
-        <Switch
-          value={side === "BUY"}
-          onValueChange={(v) => setSide(v ? "BUY" : "SELL")}
-          thumbColor={side === "BUY" ? theme.brand : theme.error}
-          trackColor={{ true: theme.brand + "44", false: theme.error + "33" }}
-        />
-      </View>
-
-      <View style={styles.row}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.label, { color: theme.text }]}>Quantity</Text>
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <TouchableOpacity style={[styles.lotBtn, { backgroundColor: theme.card }]} onPress={decLot}>
-              <Text style={[styles.lotBtnText, { color: theme.brand }]}>-</Text>
-            </TouchableOpacity>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.card, borderColor: theme.border, color: theme.text }]}
-              keyboardType="numeric"
-              placeholder="Quantity"
-              placeholderTextColor={theme.textSecondary}
-              value={quantity}
-              onChangeText={setQuantity}
-            />
-            <TouchableOpacity style={[styles.lotBtn, { backgroundColor: theme.card }]} onPress={incLot}>
-              <Text style={[styles.lotBtnText, { color: theme.brand }]}>+</Text>
-            </TouchableOpacity>
+    <ScrollView style={{ flex: 1, backgroundColor: "#eef5ff" }} contentContainerStyle={{ paddingBottom: 30 }}>
+      <View style={orderStyles.headerBg}>
+        <View style={orderStyles.headerBar}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={orderStyles.backBtn}>
+            <Ionicons name="chevron-back" size={27} color="#fff" />
+          </TouchableOpacity>
+          <Text style={orderStyles.headerTitle}>Order</Text>
+        </View>
+        <View style={orderStyles.headerInfoRow}>
+          <View>
+            <Text style={orderStyles.name}>{instrument.tradingsymbol || instrument.symbol}</Text>
+            <Text style={orderStyles.exchange}>{instrument.exchange || "NSE"}</Text>
           </View>
-          <Text style={[styles.subLabel, { color: theme.textSecondary }]}>lotSize {lotSize}</Text>
-          {isInvalidLotQuantity && (
-            <View style={[styles.smallErrorTab, { backgroundColor: theme.error + "10" }]}>
-              <Text style={[styles.smallErrorText, { color: theme.error }]}>
-                Invalid quantity: Must be a multiple of lot size ({lotSize})
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.label, { color: theme.text }]}>Price</Text>
-          <TextInput
-            style={[
-              styles.input,
-              { backgroundColor: theme.card, borderColor: theme.border, color: theme.text },
-              (orderType === "MARKET" || (orderType === "LIMIT" && slActive)) && styles.inputDisabled,
-            ]}
-            keyboardType="numeric"
-            placeholder={
-              orderType === "MARKET"
-                ? "Market uses LTP"
-                : slActive
-                ? "Set in Limit below"
-                : "Price"
-            }
-            placeholderTextColor={theme.textSecondary}
-            value={
-              orderType === "MARKET"
-                ? typeof lastPrice === "number"
-                  ? fmtToTick(lastPrice, tickSize)
-                  : ""
-                : slActive
-                ? ""
-                : price
-            }
-            onChangeText={setPrice}
-            editable={orderType === "LIMIT" && !slActive}
-          />
-          <Text style={[styles.subLabel, { color: theme.textSecondary }]}>Tick size {tickSize}</Text>
+          <View style={orderStyles.priceBox}>
+            <Text style={orderStyles.priceValue}>
+              {typeof lastPrice === "number" && !Number.isNaN(lastPrice)
+                ? fmtToTick(lastPrice, tickSize)
+                : <ActivityIndicator size="small" color="#fff" />}
+            </Text>
+          </View>
         </View>
       </View>
-
-      <Text style={[styles.label, { marginTop: 18, color: theme.text }]}>Variety</Text>
-      <View style={[styles.tabRow, { borderColor: theme.border }]}>
-        {VARIETIES.map((v) => {
-          const disabled = v === "AMO" ? marketOpen : !marketOpen;
-          return (
+      <View style={orderStyles.card}>
+        {/* Order Side */}
+        <Text style={orderStyles.sectionTitle}>Order Side</Text>
+        <View style={orderStyles.sideRow}>
+          <TouchableOpacity
+            style={[
+              orderStyles.sideBtn,
+              side === "BUY" ? orderStyles.buyActive : orderStyles.buyInactive,
+            ]}
+            onPress={() => setSide("BUY")}
+          >
+            <Text style={[
+              orderStyles.sideText,
+              side === "BUY" ? orderStyles.buyTextActive : orderStyles.buyTextInactive
+            ]}>BUY</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              orderStyles.sideBtn,
+              side === "SELL" ? orderStyles.sellActive : orderStyles.sellInactive,
+            ]}
+            onPress={() => setSide("SELL")}
+          >
+            <Text style={[
+              orderStyles.sideText,
+              side === "SELL" ? orderStyles.sellTextActive : orderStyles.sellTextInactive
+            ]}>SELL</Text>
+          </TouchableOpacity>
+        </View>
+        {/* Quantity and Price */}
+        <View style={orderStyles.qtyPriceRow}>
+          <View style={orderStyles.qtyCol}>
+            <Text style={orderStyles.label}>Quantity</Text>
+            <View style={orderStyles.quantityOuterFixed}>
+              <TouchableOpacity style={orderStyles.quantityBtnFixed} onPress={decLot}>
+                <Text style={orderStyles.quantityBtnText}>-</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={orderStyles.quantityTextFixed}
+                value={quantity}
+                onChangeText={setQuantity}
+                keyboardType="numeric"
+                maxLength={7}
+                placeholder="Quantity"
+                placeholderTextColor="#888"
+                selectionColor="#2540F6"
+                underlineColorAndroid="transparent"
+                autoCorrect={false}
+                autoCapitalize="none"
+                textAlign="center"
+                caretColor="#2540F6"
+                editable={true}
+              />
+              <TouchableOpacity style={orderStyles.quantityBtnFixed} onPress={incLot}>
+                <Text style={orderStyles.quantityBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={orderStyles.subLabel}>lotSize {lotSize}</Text>
+            {isInvalidLotQuantity && (
+              <View style={orderStyles.smallErrorTab}>
+                <Text style={orderStyles.smallErrorText}>
+                  Invalid quantity: Must be a multiple of lot size ({lotSize})
+                </Text>
+              </View>
+            )}
+          </View>
+          <View style={orderStyles.qtyCol}>
+            <Text style={orderStyles.label}>Price</Text>
+            <View style={orderStyles.priceOuterFixed}>
+              <TextInput
+                style={[
+                  orderStyles.priceInputFixed,
+                  orderType === "MARKET" && orderStyles.priceInputMarket,
+                ]}
+                keyboardType="numeric"
+                placeholder="Price"
+                value={price}
+                onChangeText={setPrice}
+                placeholderTextColor="#888"
+                selectionColor="#2540F6"
+                underlineColorAndroid="transparent"
+                textAlign="center"
+                caretColor="#2540F6"
+                editable={orderType !== "MARKET"}
+              />
+            </View>
+            <Text style={orderStyles.subLabel}>Tick size {tickSize}</Text>
+          </View>
+        </View>
+        {/* Variety Tabs */}
+        <Text style={orderStyles.label}>Variety</Text>
+        <View style={orderStyles.tabRow}>
+          {VARIETIES.map((v) => (
             <TouchableOpacity
               key={v}
-              onPress={() => !disabled && setVariety(v)}
+              onPress={() => {
+                if (allowedVarieties.includes(v)) setVariety(v);
+              }}
               style={[
-                styles.tab,
-                { backgroundColor: theme.card },
-                variety === v && { backgroundColor: theme.brand + "22", borderBottomColor: theme.brand, borderBottomWidth: 2 },
-                disabled && { opacity: 0.5 },
+                orderStyles.tab,
+                variety === v && orderStyles.tabActive,
+                !allowedVarieties.includes(v) && { opacity: 0.5 },
               ]}
-              disabled={disabled}
+              disabled={!allowedVarieties.includes(v)}
             >
-              <Text
-                style={[
-                  styles.tabText,
-                  { color: variety === v ? theme.brand : theme.textSecondary },
-                  variety === v && { fontWeight: "bold" },
-                ]}
-              >
+              <Text style={[
+                orderStyles.tabText,
+                variety === v && orderStyles.tabTextActive,
+                !allowedVarieties.includes(v) && { color: "#aaa" },
+              ]}>
                 {v}
               </Text>
             </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <Text style={[styles.label, { marginTop: 18, color: theme.text }]}>Order Type</Text>
-      <View style={[styles.tabRow, { borderColor: theme.border }]}>
-        {ORDER_TYPES.map((type) => (
-          <TouchableOpacity
-            key={type}
-            onPress={() => {
-              setOrderType(type);
-              if (type === "MARKET") setSlActive(false);
-            }}
-            style={[
-              styles.tab,
-              { backgroundColor: theme.card },
-              orderType === type && { backgroundColor: theme.brand + "22", borderBottomColor: theme.brand, borderBottomWidth: 2 },
-            ]}
-          >
-            <Text
+          ))}
+        </View>
+        {/* Order Type Tabs */}
+        <Text style={orderStyles.label}>Order Type</Text>
+        <View style={orderStyles.tabRow}>
+          {ORDER_TYPES.map((type) => (
+            <TouchableOpacity
+              key={type}
+              onPress={() => {
+                setOrderType(type);
+                if (type === "MARKET") setSlActive(false);
+              }}
               style={[
-                styles.tabText,
-                { color: orderType === type ? theme.brand : theme.textSecondary },
-                orderType === type && { fontWeight: "bold" },
+                orderStyles.tab,
+                orderType === type && orderStyles.tabActive,
               ]}
             >
-              {type}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <View style={[styles.row, { alignItems: "center" }]}>
-        <Text style={[styles.label, { color: theme.text }]}>Product</Text>
-        {productOptions.map((p) => (
-          <TouchableOpacity
-            key={p}
-            style={[styles.prodBtn, { backgroundColor: theme.card }, product === p && { backgroundColor: theme.brand }]}
-            onPress={() => setProduct(p)}
-          >
-            <Text style={product === p ? [styles.activeProdText, { color: theme.white }] : [styles.prodText, { color: theme.textSecondary }]}>{p}</Text>
-          </TouchableOpacity>
-        ))}
-
-        <View style={{ flex: 1, alignItems: "flex-end", flexDirection: "row", justifyContent: "flex-end" }}>
-          <Text style={{ color: theme.text, marginRight: 6 }}>SL</Text>
-          <Switch
-            value={slActive}
-            onValueChange={setSlActive}
-            thumbColor={slActive ? theme.brand : theme.border}
-            trackColor={{ true: theme.brand + "44", false: theme.border + "33" }}
-          />
+              <Text style={[
+                orderStyles.tabText,
+                orderType === type && orderStyles.tabTextActive,
+              ]}>
+                {type}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      </View>
-
-      {slActive && (
-        <View style={{ marginTop: 8, marginBottom: 12 }}>
-          <Text style={[styles.label, { color: theme.text }]}>Trigger Price</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: theme.card, borderColor: theme.border, color: theme.text }]}
-            keyboardType="numeric"
-            placeholder="Enter trigger price"
-            placeholderTextColor={theme.textSecondary}
-            value={triggerPrice}
-            onChangeText={setTriggerPrice}
-          />
-          {orderType === "LIMIT" && (
-            <>
-              <Text style={[styles.label, { color: theme.text, marginTop: 8 }]}>Limit Price</Text>
+        {/* Product (MIS fixed), SL Toggle */}
+        <View style={orderStyles.prodRow}>
+          <View style={orderStyles.prodBadge}>
+            <Text style={orderStyles.prodBadgeText}>MIS</Text>
+          </View>
+          <View style={orderStyles.prodSwitchRow}>
+            <Text style={orderStyles.prodSwitchLabel}>SL</Text>
+            <Switch
+              value={slActive}
+              onValueChange={setSlActive}
+              thumbColor={slActive ? "#2540F6" : "#ccc"}
+              trackColor={{ true: "#2540F6", false: "#ccc" }}
+            />
+          </View>
+        </View>
+        {/* SL details */}
+        {slActive && (
+          <View>
+            <Text style={orderStyles.label}>Trigger Price</Text>
+            <View style={orderStyles.priceOuterFixed}>
               <TextInput
-                style={[styles.input, { backgroundColor: theme.card, borderColor: theme.border, color: theme.text }]}
+                style={orderStyles.priceInputFixed}
                 keyboardType="numeric"
-                placeholder="Enter limit price"
-                placeholderTextColor={theme.textSecondary}
-                value={limitPrice}
-                onChangeText={setLimitPrice}
+                placeholder="Enter trigger price"
+                value={triggerPrice}
+                onChangeText={setTriggerPrice}
+                placeholderTextColor="#888"
+                selectionColor="#2540F6"
+                underlineColorAndroid="transparent"
+                textAlign="center"
+                caretColor="#2540F6"
+                editable={true}
               />
-              <Text style={[styles.subLabel, { color: theme.textSecondary, marginTop: 4 }]}>
-                For {side} SL: Trigger should be {side === "SELL" ? "greater than" : "less than"} Limit.
-              </Text>
-            </>
-          )}
-        </View>
-      )}
-
-      {orderType === "LIMIT" && !slActive && limitIsMarketable && (
-        <View style={[styles.smallErrorTab, { backgroundColor: "#FFF4F2" }]}>
-          <Text style={[styles.smallErrorText, { color: "#B22" }]}>
-            This LIMIT is away from current price. It will be placed as a Stop‑Limit behind the scenes and execute when price reaches ₹{price}.
-          </Text>
-        </View>
-      )}
-
-      <View style={[styles.infoBar, { backgroundColor: theme.card }]}>
-        <View style={styles.infoItem}>
-          <Text style={[styles.infoTitle, { color: theme.textSecondary }]}>Approx. Margin</Text>
-          <Text style={[styles.infoValue, { color: theme.text }]}>₹{approxMargin.toLocaleString()}</Text>
-        </View>
-        <View style={styles.infoItem}>
-          <Text style={[styles.infoTitle, { color: theme.textSecondary }]}>Brokerage</Text>
-          <Text style={[styles.infoValue, { color: theme.text }]}>₹{Number(brokerage).toFixed(2)}</Text>
-        </View>
-        <View style={styles.infoItem}>
-          <Text style={[styles.infoTitle, { color: theme.textSecondary }]}>Available Balance</Text>
-          <Text style={[styles.infoValue, { color: theme.text }]}>₹{availableBalance.toLocaleString()}</Text>
-        </View>
-      </View>
-
-      {!!errorMsg && <Text style={[styles.error, { color: theme.error }]}>{errorMsg}</Text>}
-
-      <TouchableOpacity
-        style={[styles.placeOrderBtn, { backgroundColor: !!validateOrder() ? "#aaa" : theme.brand }]}
-        onPress={handlePreview}
-        disabled={loading || !!validateOrder()}
-      >
-        <Text style={styles.submitText}>{modifyMode ? "Update Order" : "Place Order"}</Text>
-      </TouchableOpacity>
-
-      {showPreview && previewData && (
-        <Modal visible={showPreview} transparent animationType="fade">
-          <View style={styles.previewModalOverlay}>
-            <View style={[styles.previewModal, { backgroundColor: theme.card }]}>
-              <Text style={[styles.previewTitle, { color: theme.brand }]}>{modifyMode ? "Modify Order" : "Order Preview"}</Text>
-              <Text style={{ color: theme.text }}>Symbol: {previewData.tradingsymbol}</Text>
-              <Text style={{ color: theme.text }}>Side: {previewData.side}</Text>
-              <Text style={{ color: theme.text }}>Quantity: {previewData.quantity}</Text>
-              <Text style={{ color: theme.text }}>
-                Price: {previewData.price} {orderType === "MARKET" ? "(Market/LTP)" : ""}
-              </Text>
-              <Text style={{ color: theme.text }}>Variety: {previewData.variety}</Text>
-              <Text style={{ color: theme.text }}>Order Type: {previewData.orderType}</Text>
-              <Text style={{ color: theme.text }}>Product: {previewData.product}</Text>
-              {previewData.slActive && (
-                <>
-                  <Text style={{ color: theme.text }}>Trigger Price: {previewData.triggerPrice}</Text>
-                  {orderType === "LIMIT" && <Text style={{ color: theme.text }}>Limit Price: {previewData.limitPrice}</Text>}
-                </>
-              )}
-              {previewData.autoUpgraded && !modifyMode && (
-                <Text style={{ color: "#B22", marginTop: 6 }}>
-                  Note: Your LIMIT has been auto‑converted to Stop‑Limit (trigger=limit) to wait until price reaches your level.
+            </View>
+            {orderType === "LIMIT" && (
+              <>
+                <Text style={orderStyles.label}>Limit Price</Text>
+                <View style={orderStyles.priceOuterFixed}>
+                  <TextInput
+                    style={orderStyles.priceInputFixed}
+                    keyboardType="numeric"
+                    placeholder="Enter limit price"
+                    value={limitPrice}
+                    onChangeText={setLimitPrice}
+                    placeholderTextColor="#888"
+                    selectionColor="#2540F6"
+                    underlineColorAndroid="transparent"
+                    textAlign="center"
+                    caretColor="#2540F6"
+                    editable={true}
+                  />
+                </View>
+                <Text style={orderStyles.subLabel}>
+                  For {side} SL: Trigger should be {side === "SELL" ? "greater than" : "less"} than Limit.
                 </Text>
-              )}
-              <Text style={{ color: theme.text, marginTop: 8 }}>
-                Margin Required: ₹{previewData.marginRequired.toLocaleString()}
-              </Text>
-              <Text style={{ color: theme.text }}>Charges: ₹{Number(previewData.charges).toFixed(2)}</Text>
-              <Text style={{ color: theme.text }}>
-                Available Balance: ₹{previewData.availableBalance.toLocaleString()}
-              </Text>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 20 }}>
-                <TouchableOpacity style={styles.confirmBtn} onPress={handleSubmit} disabled={loading}>
-                  {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmText}>{modifyMode ? "Confirm & Update" : "Confirm & Place"}</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowPreview(false)}>
-                  <Text style={styles.cancelText}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
+              </>
+            )}
+          </View>
+        )}
+        {/* Margin/Charges display */}
+        <View style={orderStyles.infoBar}>
+          <View style={orderStyles.infoItem}>
+            <Text style={orderStyles.infoTitle}>Approx. Margin</Text>
+            <Text style={orderStyles.infoValue}>₹{approxMargin.toLocaleString()}</Text>
+          </View>
+          <View style={orderStyles.infoItem}>
+            <Text style={orderStyles.infoTitle}>Brokerage</Text>
+            <Text style={orderStyles.infoValue}>₹{Number(brokerage).toFixed(2)}</Text>
+          </View>
+          <View style={orderStyles.infoItem}>
+            <Text style={orderStyles.infoTitle}>Available Balance</Text>
+            <Text style={orderStyles.infoValue}>₹{availableBalance.toLocaleString()}</Text>
+          </View>
+        </View>
+        {/* Place Order Button */}
+        <TouchableOpacity
+          style={[
+            orderStyles.placeOrderBtn,
+            !!errorMsg ? orderStyles.placeOrderBtnDisabled : (side === "BUY" ? orderStyles.buyActive : orderStyles.sellActive)
+          ]}
+          onPress={handlePlaceOrder}
+          disabled={!!errorMsg || !allowedVarieties.includes(variety) || loading}
+        >
+          <Text style={orderStyles.placeOrderText}>{loading ? "Placing..." : "Place Order"}</Text>
+        </TouchableOpacity>
+        {!!errorMsg && (
+          <Text style={[orderStyles.errorText, { color: "#f44336" }]}>{errorMsg}</Text>
+        )}
+        {/* Success Modal */}
+        <Modal visible={showSuccessModal} transparent animationType="fade">
+          <View style={{
+            flex: 1, backgroundColor: "rgba(0,0,0,0.30)",
+            alignItems: "center", justifyContent: "center"
+          }}>
+            <View style={{
+              backgroundColor: "#fff",
+              borderRadius: 16,
+              padding: 32,
+              alignItems: "center",
+              elevation: 12,
+              minWidth: 200,
+            }}>
+              <Ionicons name="checkmark-circle-outline" size={48} color="#16c784" />
+              <Text style={{ fontWeight: "bold", fontSize: 19, color: "#16c784", marginTop: 8 }}>Order Placed!</Text>
+              <Text style={{ color: "#555", marginTop: 5 }}>Your order has been scheduled.</Text>
             </View>
           </View>
         </Modal>
-      )}
-
-      <Modal visible={showConfirmation} transparent animationType="fade">
-        <TouchableOpacity
-          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center" }}
-          activeOpacity={1}
-          onPress={() => setShowConfirmation(false)}
-        >
-          <View
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: 16,
-              padding: 36,
-              alignItems: "center",
-              elevation: 13,
-              shadowColor: "#22b573",
-              shadowOpacity: 0.22,
-              shadowRadius: 24,
-            }}
-          >
-            <Ionicons name="checkmark-circle" size={64} color="#22b573" />
-            <Text style={{ fontSize: 22, fontWeight: "bold", marginTop: 8, color: "#22b573" }}>
-              {modifyMode ? "Order Updated!" : "Order Placed!"}
-            </Text>
-            <Text style={{ marginTop: 10, color: "#333", textAlign: "center" }}>
-              {modifyMode ? "Your order changes have been saved successfully." : "Your order has been placed successfully."}
-            </Text>
-            <TouchableOpacity
-              style={{ marginTop: 18, backgroundColor: "#22b573", borderRadius: 8, paddingHorizontal: 28, paddingVertical: 12, alignItems: "center" }}
-              onPress={() => {
-                setShowConfirmation(false);
-                navigation.goBack();
-              }}
-            >
-              <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 16 }}>Go Back</Text>
-            </TouchableOpacity>
-            <Text style={{ color: "#888", marginTop: 10, fontSize: 13 }}>Tap anywhere to dismiss</Text>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      </View>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 18 },
-  headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 18, justifyContent: "space-between" },
-  ticker: { fontSize: 17, fontWeight: "bold" },
-  priceHeader: { fontSize: 17 },
-  sideRow: { flexDirection: "row", alignItems: "center", marginBottom: 18 },
-  sideLabel: { fontSize: 21, fontWeight: "bold", marginRight: 10 },
-  row: { flexDirection: "row", marginBottom: 10, gap: 10, alignItems: "center" },
-  label: { fontSize: 15, fontWeight: "bold", marginBottom: 2 },
+const orderStyles = StyleSheet.create({
+  headerBg: {
+    backgroundColor: "#2540F6",
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    paddingBottom: 18,
+    alignItems: "flex-start",
+  },
+  headerBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingTop: 18,
+    paddingHorizontal: 16,
+    paddingBottom: 7,
+    width: "100%",
+  },
+  backBtn: { padding: 5, marginRight: 2 },
+  headerTitle: { fontSize: 17, fontWeight: "700", color: "#fff", marginLeft: 8 },
+  headerInfoRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    width: "100%",
+    marginTop: 2,
+    paddingHorizontal: 16,
+    paddingBottom: 2,
+    justifyContent: "space-between",
+  },
+  name: { fontSize: 22, fontWeight: "800", color: "#fff", letterSpacing: 0.5 },
+  exchange: { fontSize: 15, color: "#c7d2fe", fontWeight: "600", marginBottom: 2 },
+  priceBox: { alignItems: "flex-end", justifyContent: "center", minWidth: 80 },
+  priceValue: { fontSize: 17, fontWeight: "700", color: "#fff" },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    marginHorizontal: 16,
+    marginTop: -18,
+    marginBottom: 10,
+    padding: 18,
+    shadowColor: "#2540F6",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 14,
+    elevation: 8,
+    borderWidth: 1.5,
+    borderColor: "#e3e3e3",
+  },
+  sectionTitle: { fontSize: 15, fontWeight: "700", color: "#232323", marginBottom: 11, marginTop: 13 },
+  sideRow: { flexDirection: "row", gap: 10, marginBottom: 7, marginTop: -6 },
+  sideBtn: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 2,
+    alignItems: "center",
+    paddingVertical: 13,
+    elevation: 1,
+  },
+  buyActive: { backgroundColor: "#16c784", borderColor: "#16c784" },
+  buyInactive: { backgroundColor: "#fff", borderColor: "#16c784" },
+  buyTextActive: { color: "#fff", fontWeight: "bold" },
+  buyTextInactive: { color: "#16c784", fontWeight: "bold" },
+  sellActive: { backgroundColor: "#f44336", borderColor: "#f44336" },
+  sellInactive: { backgroundColor: "#fff", borderColor: "#f44336" },
+  sellTextActive: { color: "#fff", fontWeight: "bold" },
+  sellTextInactive: { color: "#f44336", fontWeight: "bold" },
+  sideText: { fontSize: 16, fontWeight: "700", letterSpacing: 0.3 },
+  qtyPriceRow: { flexDirection: "row", gap: 16, marginBottom: 10, marginTop: 8 },
+  qtyCol: { flex: 1, minWidth: 0 },
+
+  quantityOuterFixed: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 2,
+    borderRadius: 8,
+    borderColor: "#e3e3e3",
+    backgroundColor: "#F6F6FA",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    minWidth: 0,
+    height: 44,
+    width: "100%",
+  },
+  quantityBtnFixed: {
+    backgroundColor: "#F6F7FB",
+    borderRadius: 8,
+    padding: 8,
+    width: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 0,
+    flexShrink: 0,
+  },
+  quantityTextFixed: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#232323",
+    textAlign: "center",
+    backgroundColor: "#fff",
+    minWidth: 70,
+    maxWidth: 120,
+    flexGrow: 0,
+    paddingHorizontal: 0,
+    marginHorizontal: 0,
+    outlineWidth: 0,
+    outlineColor: "transparent",
+    caretColor: "#2540F6",
+    borderWidth: 0,
+    height: 40,
+    fontFamily: Platform.OS === "web" ? "monospace" : undefined,
+  },
+  priceOuterFixed: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 2,
+    borderRadius: 8,
+    borderColor: "#e3e3e3",
+    backgroundColor: "#F6F6FA",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    minWidth: 0,
+    height: 44,
+    width: "100%",
+    overflow: "hidden",
+    marginBottom: 4,
+  },
+  priceInputFixed: {
+    borderWidth: 0,
+    borderRadius: 8,
+    padding: 0,
+    fontSize: 18,
+    minWidth: 60,
+    flex: 1,
+    backgroundColor: "#fff",
+    color: "#232323",
+    outlineWidth: 0,
+    outlineColor: "transparent",
+    caretColor: "#2540F6",
+    textAlign: "center",
+    height: 40,
+    marginHorizontal: 0,
+    paddingHorizontal: 0,
+    opacity: 1,
+  },
+  priceInputMarket: {
+    color: "#888",
+    backgroundColor: "#f4f4f4",
+    opacity: 0.7,
+  },
   subLabel: { fontSize: 12, marginLeft: 2, marginBottom: 4 },
-  input: { borderWidth: 1, borderRadius: 8, padding: 10, fontSize: 16, marginBottom: 2, minWidth: 60, flex: 1 },
-  inputDisabled: { backgroundColor: "#eee", color: "#aaa" },
+  smallErrorTab: {
+    borderRadius: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    marginTop: 6,
+    alignSelf: "flex-start",
+    minWidth: "65%",
+    backgroundColor: "#FFF4F2",
+  },
+  smallErrorText: { fontSize: 13, textAlign: "left", fontWeight: "600", color: "#f44336" },
   tabRow: { flexDirection: "row", marginBottom: 12, marginTop: 8, borderRadius: 8, overflow: "hidden" },
-  tab: { flex: 1, paddingVertical: 10, alignItems: "center" },
-  tabText: { fontSize: 15 },
-  prodBtn: { borderRadius: 8, paddingVertical: 6, paddingHorizontal: 14, marginHorizontal: 4 },
-  prodText: { fontSize: 14 },
-  activeProdText: { fontWeight: "bold", fontSize: 14 },
-  lotBtn: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 2, marginHorizontal: 2, alignItems: "center" },
-  lotBtnText: { fontSize: 19, fontWeight: "bold" },
-  infoBar: { flexDirection: "row", justifyContent: "space-between", borderRadius: 8, padding: 10, marginVertical: 14 },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#e3e3e3",
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    marginHorizontal: 4,
+  },
+  tabActive: { backgroundColor: "#2540F6", borderColor: "#2540F6" },
+  tabText: { fontSize: 15, color: "#232323" },
+  tabTextActive: { color: "#fff", fontWeight: "bold" },
+  prodRow: { flexDirection: "row", alignItems: "center", marginVertical: 12, gap: 8 },
+  prodBadge: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: "#e0e7ff",
+    borderRadius: 12,
+    marginRight: 7,
+  },
+  prodBadgeText: { fontWeight: "700", color: "#2540F6", fontSize: 15 },
+  prodSwitchRow: { flexDirection: "row", alignItems: "center", marginLeft: "auto" },
+  prodSwitchLabel: { fontSize: 15, color: "#232323", marginRight: 8 },
+  infoBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    borderRadius: 8,
+    padding: 10,
+    marginVertical: 14,
+    backgroundColor: "#eef5ff",
+    borderWidth: 2,
+    borderColor: "#e3e3e3",
+  },
   infoItem: { alignItems: "flex-start" },
-  infoTitle: { fontSize: 12 },
-  infoValue: { fontWeight: "bold", fontSize: 14 },
-  placeOrderBtn: { borderRadius: 6, padding: 14, alignItems: "center", marginTop: 6 },
-  submitText: { color: "#fff", fontWeight: "bold", fontSize: 17 },
-  error: { textAlign: "center", marginTop: 14, marginBottom: 7 },
-  smallErrorTab: { borderRadius: 6, paddingVertical: 5, paddingHorizontal: 10, marginTop: 6, alignSelf: "flex-start", minWidth: "65%" },
-  smallErrorText: { fontSize: 13, textAlign: "left", fontWeight: "600" },
-  previewModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.18)", justifyContent: "center", alignItems: "center" },
-  previewModal: { width: "88%", borderRadius: 18, padding: 22, elevation: 8, alignItems: "flex-start" },
-  previewTitle: { fontWeight: "bold", fontSize: 20, marginBottom: 13 },
-  confirmBtn: { backgroundColor: "#27ae60", borderRadius: 8, paddingVertical: 10, paddingHorizontal: 18, alignItems: "center", marginRight: 10 },
-  confirmText: { color: "#fff", fontWeight: "bold", fontSize: 15 },
-  cancelBtn: { backgroundColor: "#c0392b", borderRadius: 8, paddingVertical: 10, paddingHorizontal: 18, alignItems: "center" },
-  cancelText: { color: "#fff", fontWeight: "bold", fontSize: 15 },
+  infoTitle: { fontSize: 12, color: "#888" },
+  infoValue: { fontWeight: "bold", fontSize: 14, color: "#232323" },
+  placeOrderBtn: {
+    borderRadius: 6,
+    padding: 14,
+    alignItems: "center",
+    marginTop: 6,
+  },
+  placeOrderBtnDisabled: {
+    backgroundColor: "#aaa",
+  },
+  placeOrderText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 17,
+  },
+  errorText: {
+    textAlign: "center",
+    marginTop: 14,
+    marginBottom: 7,
+    color: "#f44336",
+  },
 });

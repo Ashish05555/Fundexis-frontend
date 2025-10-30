@@ -6,31 +6,11 @@ import { auth, db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 
-const COLORS = {
-  bg: "#F6F7FB",
-  card: "#FFFFFF",
-  border: "#E6E8EF",
-  title: "#0E1C47",
-  section: "#24355E",
-  label: "#7A839A",
-  value: "#0F172A",
-  pillBg: "#F3F4FF",
-  pillBorder: "#DDE3FF",
-  pillText: "#2440FF",
-  activeBg: "#2440FF",
-  activeBorder: "#1F37E4",
-  activeText: "#FFFFFF",
-  passedBg: "#DCFCE7",
-  passedBorder: "#86EFAC",
-  passedText: "#166534",
-  failedBg: "#FEE2E2",
-  failedBorder: "#FECACA",
-  failedText: "#B91C1C",
-  breachedBg: "#FEE2E2",
-  breachedBorder: "#FECACA",
-  breachedText: "#B91C1C",
-  muted: "#6B7280",
-};
+const PHASE_TABS = [
+  { key: "phase1", label: "Phase 1" },
+  { key: "phase2", label: "Phase 2" },
+  { key: "funded", label: "Funded" },
+];
 
 export default function MyChallengesScreen() {
   const insets = useSafeAreaInsets();
@@ -42,6 +22,9 @@ export default function MyChallengesScreen() {
 
   const [loading, setLoading] = useState(true);
   const [challenges, setChallenges] = useState([]);
+
+  // Tab state: default to "phase1"
+  const [activeTab, setActiveTab] = useState("phase1");
 
   useEffect(() => {
     let isMounted = true;
@@ -67,7 +50,7 @@ export default function MyChallengesScreen() {
     return () => { isMounted = false; };
   }, [userId]);
 
-  // Buckets strictly by phase field. We never auto-move.
+  // Buckets strictly by phase field
   const { phase1, phase2, funded } = useMemo(() => {
     const p1 = [], p2 = [], fn = [];
     for (const ch of challenges) {
@@ -84,16 +67,77 @@ export default function MyChallengesScreen() {
   const fundedCount = funded.length;
   const totalActive = phase1Count + phase2Count + fundedCount;
 
+  // Tab content
+  const renderTabContent = () => {
+    if (loading) {
+      return (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="small" color="#1740FF" />
+          <Text style={styles.loadingText}>Loading your challenges…</Text>
+        </View>
+      );
+    }
+    if (activeTab === "phase1") {
+      return (
+        <>
+          <SectionTitle>Phase 1 Challenges</SectionTitle>
+          {phase1.length === 0 ? (
+            <EmptyState>No Phase 1 challenges yet</EmptyState>
+          ) : (
+            <View style={styles.cardsStack}>
+              {phase1.map((ch) => (
+                <ChallengeCard key={ch.id} challenge={ch} phase="1" />
+              ))}
+            </View>
+          )}
+        </>
+      );
+    }
+    if (activeTab === "phase2") {
+      return (
+        <>
+          <SectionTitle>Phase 2 Challenges</SectionTitle>
+          {phase2.length === 0 ? (
+            <EmptyState>No Phase 2 challenges yet</EmptyState>
+          ) : (
+            <View style={styles.cardsStack}>
+              {phase2.map((ch) => (
+                <ChallengeCard key={ch.id} challenge={ch} phase="2" />
+              ))}
+            </View>
+          )}
+        </>
+      );
+    }
+    if (activeTab === "funded") {
+      return (
+        <>
+          <SectionTitle>Funded Accounts</SectionTitle>
+          {funded.length === 0 ? (
+            <EmptyState>No funded accounts yet</EmptyState>
+          ) : (
+            <View style={styles.cardsStack}>
+              {funded.map((ch) => (
+                <ChallengeCard key={ch.id} challenge={ch} phase="funded" />
+              ))}
+            </View>
+          )}
+        </>
+      );
+    }
+    return null;
+  };
+
   return (
     <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-      {/* Header: back extreme left, title centered */}
+      {/* Header */}
       <View style={styles.headerBar}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.headerBack}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Ionicons name="chevron-back" size={22} color={COLORS.title} />
+          <Ionicons name="chevron-back" size={22} color="#0E1C47" />
         </TouchableOpacity>
 
         <View pointerEvents="none" style={styles.headerTitleWrap}>
@@ -103,119 +147,86 @@ export default function MyChallengesScreen() {
         </View>
       </View>
 
-      {/* Pills */}
-      <View style={styles.pillsRow}>
-        <Pill>{phase1Count} Phase 1</Pill>
-        <Pill>{phase2Count} Phase 2</Pill>
-        <Pill>{fundedCount} Funded</Pill>
+      {/* Phase Tabs (clickable) */}
+      <View style={styles.tabsRow}>
+        <TabButton
+          label={`${phase1Count} Phase 1`}
+          active={activeTab === "phase1"}
+          onPress={() => setActiveTab("phase1")}
+        />
+        <TabButton
+          label={`${phase2Count} Phase 2`}
+          active={activeTab === "phase2"}
+          onPress={() => setActiveTab("phase2")}
+        />
+        <TabButton
+          label={`${fundedCount} Funded`}
+          active={activeTab === "funded"}
+          onPress={() => setActiveTab("funded")}
+        />
       </View>
 
       {/* Content */}
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {loading ? (
-          <View style={styles.loadingWrap}>
-            <ActivityIndicator size="small" color={COLORS.pillText} />
-            <Text style={styles.loadingText}>Loading your challenges…</Text>
-          </View>
-        ) : (
-          <>
-            <SectionTitle>Phase 1 Challenges</SectionTitle>
-            {phase1.length === 0 ? (
-              <EmptyLine>No Phase 1 challenges yet</EmptyLine>
-            ) : (
-              <View style={styles.cardsStack}>
-                {phase1.map((ch) => (
-                  <ChallengeCard key={ch.id} challenge={ch} phase="1" />
-                ))}
-              </View>
-            )}
-
-            <SectionTitle>Phase 2 Challenges</SectionTitle>
-            {phase2.length === 0 ? (
-              <EmptyLine>No Phase 2 challenges yet</EmptyLine>
-            ) : (
-              <View style={styles.cardsStack}>
-                {phase2.map((ch) => (
-                  <ChallengeCard key={ch.id} challenge={ch} phase="2" />
-                ))}
-              </View>
-            )}
-
-            <SectionTitle>Funded Accounts</SectionTitle>
-            {funded.length === 0 ? (
-              <EmptyLine>No funded accounts yet</EmptyLine>
-            ) : (
-              <View style={styles.cardsStack}>
-                {funded.map((ch) => (
-                  <ChallengeCard key={ch.id} challenge={ch} phase="funded" />
-                ))}
-              </View>
-            )}
-          </>
-        )}
+        {renderTabContent()}
       </ScrollView>
     </View>
   );
 }
 
-/* -------------------------------- Card -------------------------------- */
+/* -------------------------------- TabButton -------------------------------- */
+function TabButton({ label, active, onPress }) {
+  return (
+    <TouchableOpacity
+      style={[styles.tabButton, active && styles.tabButtonActive]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      <Text style={[styles.tabButtonText, active && styles.tabButtonTextActive]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
 
+/* -------------------------------- Challenge Card -------------------------------- */
 function ChallengeCard({ challenge, phase }) {
-  const base = pickBaseAmount(challenge);
-  const tenPct = round2(base * 0.1);
-  const title = getChallengeTitle(challenge, base);
+  // Get correct base amount and calculate proper target/max loss
+  const baseAmount = getCorrectBaseAmount(challenge);
+  const targetAmount = baseAmount * 0.1; // 10% of base amount
+  const maxLossAmount = baseAmount * 0.1; // 10% of base amount
 
-  // Compute the display status according to your rules
+  const title = getChallengeTitle(challenge, baseAmount);
   const displayStatus = getDisplayStatusForPhase(phase, challenge);
 
-  const statusStyle =
-    displayStatus === "BREACHED" ? styles.statusBreached :
-    displayStatus === "FAILED"   ? styles.statusFailed   :
-    displayStatus === "PASSED"   ? styles.statusPassed   :
-                                   styles.statusActive;
-
-  const statusTextStyle =
-    displayStatus === "BREACHED" ? styles.statusBreachedText :
-    displayStatus === "FAILED"   ? styles.statusFailedText   :
-    displayStatus === "PASSED"   ? styles.statusPassedText   :
-                                   styles.statusActiveText;
-
-  // Visibility of metrics per phase
-  const showTarget = phase !== "funded"; // Phase 1/2 show target 10%
-  const showMaxLoss = true;              // All phases show Max Loss 10%; funded shows only max loss
+  const statusConfig = getStatusConfig(displayStatus);
 
   return (
-    <View style={styles.card}>
-      <View style={styles.cardTop}>
-        <Text style={styles.cardTitle} numberOfLines={1}>{title}</Text>
-        <View style={[styles.statusPill, statusStyle]}>
-          <Text style={statusTextStyle}>{displayStatus}</Text>
+    <View style={styles.challengeCard}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.challengeTitle} numberOfLines={1}>{title}</Text>
+        <View style={[styles.statusBadge, statusConfig.style]}>
+          <Text style={statusConfig.textStyle}>{displayStatus}</Text>
         </View>
       </View>
 
-      <View style={styles.metricsRow}>
-        <View style={styles.metricLeft}>
-          {showTarget ? (
-            <>
-              <Text style={styles.metricLabel}>Target:</Text>
-              <Text style={styles.metricValue}>{formatINR(tenPct)}</Text>
-            </>
-          ) : (
-            <Text style={[styles.metricLabel, { color: "transparent" }]}>.</Text>
-          )}
-        </View>
-        {showMaxLoss && (
-          <View style={styles.metricRight}>
-            <Text style={styles.metricLabel}>Max Loss:</Text>
-            <Text style={styles.metricValue}>{formatINR(tenPct)}</Text>
+      <View style={styles.metricsContainer}>
+        {phase !== "funded" && (
+          <View style={styles.metricItem}>
+            <Text style={styles.metricLabel}>TARGET:</Text>
+            <Text style={styles.metricValue}>{formatCurrency(targetAmount)}</Text>
           </View>
         )}
+        <View style={styles.metricItem}>
+          <Text style={styles.metricLabel}>MAX LOSS:</Text>
+          <Text style={styles.metricValue}>{formatCurrency(maxLossAmount)}</Text>
+        </View>
       </View>
     </View>
   );
 }
 
-/* ------------------------------ Status logic ----------------------------- */
+/* -------------------------------- Helper Functions -------------------------------- */
 
 function normalizePhase(raw) {
   const s = String(raw ?? "").trim().toLowerCase();
@@ -224,7 +235,6 @@ function normalizePhase(raw) {
   return "1";
 }
 
-// Map DB statuses/notes to a unified label per phase
 function getDisplayStatusForPhase(phase, ch) {
   const tokens = [
     ch?.status,
@@ -238,7 +248,6 @@ function getDisplayStatusForPhase(phase, ch) {
   ].filter(Boolean).map(v => String(v).toLowerCase());
 
   const text = tokens.join(" | ");
-
   const has = (arr) => arr.some(m => text.includes(m));
 
   const passed = ["passed","pass","completed","complete","target hit","target_hit","target achieved","approved","cleared","success"];
@@ -246,45 +255,86 @@ function getDisplayStatusForPhase(phase, ch) {
   const failed = ["failed","fail","terminated","rejected","closed"];
 
   if (phase === "funded") {
-    // Funded shows only Active or Breached
     if (has(breached) || has(failed)) return "BREACHED";
     return "ACTIVE";
   }
 
-  // Phase 1/2: Active, Passed, Failed (breaches count as Failed here)
   if (has(passed)) return "PASSED";
   if (has(breached) || has(failed)) return "FAILED";
   return "ACTIVE";
 }
 
-/* -------------------------------- Helpers -------------------------------- */
+function getCorrectBaseAmount(challenge) {
+  // Use the same logic as ChallengeContext to get correct amounts
+  const templateId = challenge?.templateId || "1";
 
-function pickBaseAmount(ch) {
+  if (templateId === "1") {
+    return 100000; // 1 Lakh Challenge
+  } else if (templateId === "2") {
+    return 500000; // 5 Lakh Challenge  
+  } else if (templateId === "3") {
+    return 1000000; // 10 Lakh Challenge
+  }
+
+  // Fallback to existing logic
   const candidates = [
-    ch?.accountSize,
-    ch?.challengeSize,
-    ch?.initialBalance,
-    ch?.startingBalance,
-    ch?.baseAmount,
-    ch?.balance,
-    ch?.size,
-    ch?.amount,
-    ch?.maxDrawdownBase,
+    challenge?.accountSize,
+    challenge?.challengeSize,
+    challenge?.initialBalance,
+    challenge?.startingBalance,
+    challenge?.baseAmount,
+    challenge?.balance,
+    challenge?.size,
+    challenge?.amount,
+    challenge?.maxDrawdownBase,
   ];
+
   for (const v of candidates) {
     const n = toNumber(v);
     if (n > 0) return n;
   }
-  return 0;
+
+  return 100000; // Default to 1 Lakh
 }
 
-function getChallengeTitle(ch, base) {
-  if (ch?.title) return ch.title;
-  // Fallback title: prefer an explicit code if provided
-  const code = String(ch?.code || ch?.challengeCode || ch?.id || "").slice(-5);
-  const lakh = base >= 100000 ? Math.round(base / 100000) : 0;
+function getChallengeTitle(challenge, baseAmount) {
+  if (challenge?.title) return challenge.title;
+
+  const code = String(challenge?.code || challenge?.challengeCode || challenge?.accountNumber || challenge?.id || "").slice(-5);
+  const lakh = baseAmount >= 100000 ? Math.round(baseAmount / 100000) : 0;
+
   if (lakh > 0) return `${lakh} Lakh Challenge #${code || ""}`.trim();
   return `Challenge #${code || ""}`.trim();
+}
+
+function getStatusConfig(status) {
+  switch (status) {
+    case "ACTIVE":
+      return {
+        style: { backgroundColor: "#1740FF", borderColor: "#1740FF" },
+        textStyle: { color: "#FFFFFF" }
+      };
+    case "PASSED":
+      return {
+        style: { backgroundColor: "#DCFCE7", borderColor: "#86EFAC" },
+        textStyle: { color: "#166534" }
+      };
+    case "FAILED":
+      return {
+        style: { backgroundColor: "#FEE2E2", borderColor: "#FECACA" },
+        textStyle: { color: "#B91C1C" }
+      };
+    case "BREACHED":
+      return {
+        style: { backgroundColor: "#FEE2E2", borderColor: "#FECACA" },
+        textStyle: { color: "#B91C1C" }
+      };
+    default:
+      return {
+        style: { backgroundColor: "#1740FF", borderColor: "#1740FF" },
+        textStyle: { color: "#FFFFFF" }
+      };
+  }
 }
 
 function toNumber(v) {
@@ -295,10 +345,8 @@ function toNumber(v) {
   }
   return 0;
 }
-function round2(x) {
-  return Math.round((Number(x) || 0) * 100) / 100;
-}
-function formatINR(n) {
+
+function formatCurrency(n) {
   const num = typeof n === "number" ? n : toNumber(n);
   try {
     return num.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
@@ -307,40 +355,53 @@ function formatINR(n) {
   }
 }
 
-/* -------------------------------- Styles --------------------------------- */
+/* -------------------------------- Presentational Components -------------------------------- */
+
+function SectionTitle({ children }) {
+  return <Text style={styles.sectionTitle}>{children}</Text>;
+}
+
+function EmptyState({ children }) {
+  return (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyText}>{children}</Text>
+    </View>
+  );
+}
+
+/* -------------------------------- Styles -------------------------------- */
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: "#F6F7FB",
   },
 
-  // Header: back absolute left; title centered regardless of back width
+  // Header
   headerBar: {
     height: 58,
     justifyContent: "center",
     alignItems: "center",
     position: "relative",
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
   },
   headerBack: {
     position: "absolute",
-    left: 12,
+    left: 16,
     top: 10,
     width: 38,
     height: 38,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#EEF1F9",
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
-      android: { elevation: 1 },
-    }),
+    backgroundColor: "#F3F4F6",
   },
   headerTitleWrap: {
     position: "absolute",
-    left: 56,
-    right: 56,
+    left: 60,
+    right: 60,
     top: 0,
     bottom: 0,
     alignItems: "center",
@@ -348,181 +409,153 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 20,
-    lineHeight: 26,
-    fontWeight: "900",
-    color: COLORS.title,
+    fontWeight: "800",
+    color: "#0E1C47",
     letterSpacing: 0.2,
   },
 
-  pillsRow: {
+  // Tabs (row)
+  tabsRow: {
     flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-  },
-  pill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: COLORS.pillBg,
-    borderWidth: 1,
-    borderColor: COLORS.pillBorder,
-  },
-  pillText: {
-    fontSize: 13,
-    fontWeight: "900",
-    color: COLORS.pillText,
-  },
-
-  scroll: {
-    paddingHorizontal: 12,
-    paddingBottom: 18,
     gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
   },
-
-  sectionTitle: {
-    fontSize: 15,
-    lineHeight: 21,
-    fontWeight: "900",
-    color: COLORS.section,
-    paddingHorizontal: 4,
-    paddingTop: 10,
-    paddingBottom: 6,
-  },
-
-  emptyLine: {
+  tabButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "#EEF2FF",
     borderWidth: 1,
-    borderStyle: "dashed",
-    borderColor: COLORS.border,
-    backgroundColor: "#F8FAFF",
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderColor: "#DDE3FF",
+  },
+  tabButtonActive: {
+    backgroundColor: "#1740FF",
+    borderColor: "#1740FF",
+  },
+  tabButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1740FF",
+  },
+  tabButtonTextActive: {
+    color: "#FFFFFF",
+  },
+
+  // Content
+  scroll: {
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+    paddingTop: 16,
+  },
+
+  // Loading
+  loadingWrap: {
     alignItems: "center",
+    paddingVertical: 40,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#6B7280",
+    fontWeight: "500",
+  },
+
+  // Section Title
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0E1C47",
+    marginBottom: 12,
+    marginTop: 8,
+  },
+
+  // Empty State
+  emptyState: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderStyle: "dashed",
   },
   emptyText: {
-    fontSize: 13,
-    color: COLORS.muted,
+    fontSize: 16,
+    color: "#6B7280",
+    fontWeight: "500",
   },
 
+  // Cards
   cardsStack: {
     gap: 12,
-    paddingHorizontal: 4,
   },
 
-  card: {
+  // Challenge Card
+  challengeCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 16,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOpacity: 0.045, shadowRadius: 10, shadowOffset: { width: 0, height: 3 } },
-      android: { elevation: 2 },
-    }),
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
 
-  cardTop: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  cardTitle: {
-    flex: 1,
-    fontSize: 16,
-    lineHeight: 22,
-    fontWeight: "900",
-    color: "#162D6B",
-  },
-
-  statusPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  statusActive: {
-    backgroundColor: COLORS.activeBg,
-    borderColor: COLORS.activeBorder,
-  },
-  statusActiveText: {
-    color: COLORS.activeText,
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  statusPassed: {
-    backgroundColor: COLORS.passedBg,
-    borderColor: COLORS.passedBorder,
-  },
-  statusPassedText: {
-    color: COLORS.passedText,
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  statusFailed: {
-    backgroundColor: COLORS.failedBg,
-    borderColor: COLORS.failedBorder,
-  },
-  statusFailedText: {
-    color: COLORS.failedText,
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  statusBreached: {
-    backgroundColor: COLORS.breachedBg,
-    borderColor: COLORS.breachedBorder,
-  },
-  statusBreachedText: {
-    color: COLORS.breachedText,
-    fontSize: 11,
-    fontWeight: "900",
-  },
-
-  metricsRow: {
-    marginTop: 10,
+  cardHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginBottom: 12,
   },
-  metricLeft: {
+
+  challengeTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0E1C47",
+    marginRight: 12,
+  },
+
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+
+  // Metrics
+  metricsContainer: {
     flexDirection: "row",
-    alignItems: "baseline",
-    gap: 6,
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  metricRight: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 6,
+
+  metricItem: {
+    alignItems: "center",
   },
+
   metricLabel: {
-    fontSize: 11,
-    lineHeight: 15,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-    color: COLORS.label,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6B7280",
+    marginBottom: 4,
+    letterSpacing: 0.5,
   },
+
   metricValue: {
-    fontSize: 15,
-    lineHeight: 21,
-    fontWeight: "900",
-    color: COLORS.value,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0E1C47",
   },
 });
-
-/* ---------------- Small presentational components ---------------- */
-function Pill({ children }) {
-  return (
-    <View style={styles.pill}>
-      <Text style={styles.pillText}>{children}</Text>
-    </View>
-  );
-}
-function SectionTitle({ children }) {
-  return <Text style={styles.sectionTitle}>{children}</Text>;
-}
-function EmptyLine({ children }) {
-  return (
-    <View style={styles.emptyLine}>
-      <Text style={styles.emptyText}>{children}</Text>
-    </View>
-  );
-}

@@ -16,7 +16,7 @@ export default function useRestLivePrices(tokens = [], interval = 500) {
           return;
         }
         // Use API URL from environment variable, fallback to DigitalOcean IP
-        const baseUrl = process.env.REACT_APP_API_URL || "http://159.65.157.202:3000";
+        const baseUrl = process.env.REACT_APP_API_URL || "http://159.65.157.202:9000";
         const url = `${baseUrl.replace(/\/$/, "")}/api/prices/batch?tokens=${tokens.join(",")}`;
         const res = await fetch(url, {
           method: "GET",
@@ -27,10 +27,19 @@ export default function useRestLivePrices(tokens = [], interval = 500) {
         if (!res.ok) return;
 
         const data = await res.json();
+        // Debug log the API response
+        console.log("[useRestLivePrices] API Response:", data);
 
-        // The backend returns:
+        // The backend should return:
         // {
-        //   "738561": { "instrument_token": 738561, "last_price": 1398, "updated_at": 1760607782247 }
+        //   "738561": {
+        //      "instrument_token": 738561,
+        //      "last_price": 1398,
+        //      "ohlc": { "open": ..., "high": ..., "low": ..., "close": ... },
+        //      "change": ...,
+        //      "changePct": ...,
+        //      "updated_at": 1760607782247
+        //   }
         // }
         const updated = {};
         tokens.forEach((token) => {
@@ -41,8 +50,10 @@ export default function useRestLivePrices(tokens = [], interval = 500) {
               entry && entry.last_price !== undefined && entry.last_price !== null
                 ? entry.last_price
                 : null,
+            ohlc: entry?.ohlc ?? {},
+            change: entry?.change ?? null,
+            changePct: entry?.changePct ?? null,
             updated_at: entry?.updated_at ?? null,
-            // Optionally, attach the full entry for debugging
             raw: entry,
           };
         });
@@ -55,6 +66,9 @@ export default function useRestLivePrices(tokens = [], interval = 500) {
           fallback[String(token)] = {
             instrument_token: String(token),
             price: null,
+            ohlc: {},
+            change: null,
+            changePct: null,
             error: "Fetch error",
           };
         });
@@ -69,14 +83,12 @@ export default function useRestLivePrices(tokens = [], interval = 500) {
       cancelled = true;
       clearInterval(timer);
     };
-    // Only re-run if token list or interval actually changes
   }, [JSON.stringify(tokens), interval]);
 
-  // Extra: force refresh when tokens change, even if interval hasn't fired yet
   useEffect(() => {
     if (prevTokensRef.current !== JSON.stringify(tokens)) {
       prevTokensRef.current = JSON.stringify(tokens);
-      setPrices({}); // clear stale prices immediately
+      setPrices({});
     }
   }, [tokens]);
 

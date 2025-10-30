@@ -4,16 +4,6 @@
  * - Zerodha-like instrument search UI for search results.
  * - Props:
  *    - onSelect?: function(instrument) => void  // optional; if provided, called when a row is pressed. Otherwise navigates to "InstrumentDetailScreen".
- * - Data dependency for each instrument object:
- *    {
- *      id?: string,
- *      token?: number | string,
- *      name?: string,
- *      symbol?: string,
- *      exchange?: 'NSE' | 'BSE' | 'NFO',
- *      isDeriv?: boolean,
- *      lastPrice?: number
- *    }
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -178,7 +168,6 @@ const parseApiResult = (res) => {
   return [];
 };
 
-// --- Price formatting helper ---
 export function formatPrice(inst, lastPrice) {
   const isNFO = inst.isDeriv === true || getExchange(inst) === "NFO";
   if (lastPrice === null || lastPrice === undefined || lastPrice === "—") return "—";
@@ -186,7 +175,6 @@ export function formatPrice(inst, lastPrice) {
   return `₹ ${lastPrice}`;
 }
 
-// --- ExchangeTag component ---
 export function ExchangeTag({ exchange, theme }) {
   if (exchange === "NFO") return null;
   const isDark = theme.mode === 'dark';
@@ -225,7 +213,6 @@ ExchangeTag.propTypes = {
   theme: PropTypes.object.isRequired,
 };
 
-// --- Row component ---
 function InstrumentRow({ instrument, price, onPress, theme }) {
   const ex = getExchange(instrument);
   const showTag = !(instrument.isDeriv === true || ex === "NFO");
@@ -252,7 +239,6 @@ function InstrumentRow({ instrument, price, onPress, theme }) {
       accessibilityRole="button"
       accessibilityLabel={`${getName(instrument)}, ${showTag ? ex : ''}, Price ${formatPrice(instrument, price)}`}
     >
-      {/* Left: Name + Tag */}
       <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
         <Text
           style={[
@@ -265,7 +251,6 @@ function InstrumentRow({ instrument, price, onPress, theme }) {
         </Text>
         {showTag && <ExchangeTag exchange={ex} theme={theme} />}
       </View>
-      {/* Right: Price */}
       <View style={{ minWidth: 64, alignItems: 'flex-end', justifyContent: 'center' }}>
         <Text
           style={[
@@ -288,7 +273,6 @@ InstrumentRow.propTypes = {
   theme: PropTypes.object.isRequired,
 };
 
-// --- Main SearchScreen ---
 const SearchScreen = ({ onSelect }) => {
   const [query, setQuery] = useState('');
   const [rawResults, setRawResults] = useState([]);
@@ -297,32 +281,32 @@ const SearchScreen = ({ onSelect }) => {
   const navigation = useNavigation();
   const theme = useTheme();
 
+  // Debug: Log rawResults and rankedResults to ensure tokens are present
+  useEffect(() => {
+    console.log("RAW SEARCH RESULTS:", rawResults);
+  }, [rawResults]);
+
   const rankedResults = useMemo(() => {
-    return rankAndFilterInstruments(query, rawResults, {
+    const ranked = rankAndFilterInstruments(query, rawResults, {
       limit: 200,
       preferNSEWithinPair: true,
     });
+    console.log("RANKED RESULTS:", ranked);
+    return ranked;
   }, [query, rawResults]);
 
-  const tokens = useMemo(
-    () => rankedResults.slice(0, 20).map(inst => String(inst.instrument_token ?? inst.token ?? "")).filter(Boolean),
-    [rankedResults]
-  );
-
-  const debounceRef = useRef(null);
-  const triggerSearch = () => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      handleSearch();
-    }, 200);
-  };
-
+  // FIX: Always ensure instrument_token or token is present after parsing API results
   const handleSearch = async () => {
     try {
       setLoading(true);
       setError('');
       const apiRes = await searchInstruments(query);
-      const instruments = parseApiResult(apiRes);
+      // Map instruments to guarantee instrument_token is present for price fetching
+      const instruments = parseApiResult(apiRes).map(inst => ({
+        ...inst,
+        instrument_token: inst.instrument_token || inst.token || inst.id || inst.symbol || null
+      }));
+      console.log("PARSED INSTRUMENTS (AFTER MAPPING):", instruments);
       setRawResults(instruments);
     } catch (err) {
       setError(err?.message || "Search failed");
@@ -330,6 +314,21 @@ const SearchScreen = ({ onSelect }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Provide all tokens for live price polling (now guaranteed to be present)
+  const tokens = useMemo(
+    () => rankedResults.map(inst => String(inst.instrument_token ?? inst.token ?? "")).filter(Boolean),
+    [rankedResults]
+  );
+
+  // Debounce search requests
+  const debounceRef = useRef(null);
+  const triggerSearch = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      handleSearch();
+    }, 300); // Slightly longer debounce for better UX
   };
 
   const handleInstrumentPress = (instrument) => {
@@ -345,8 +344,14 @@ const SearchScreen = ({ onSelect }) => {
     triggerSearch();
   };
 
+  // Results List with live prices
   const ResultsList = React.useCallback(() => {
     const livePrices = useLivePrices(tokens);
+
+    useEffect(() => {
+      console.log("SEARCHSCREEN - TOKENS FOR LIVE PRICES:", tokens);
+      console.log("SEARCHSCREEN - LIVE PRICES:", livePrices);
+    }, [tokens, livePrices]);
 
     const renderItem = ({ item, index }) => {
       const token = String(item.instrument_token ?? item.token ?? index);
@@ -360,6 +365,10 @@ const SearchScreen = ({ onSelect }) => {
         rawPrice === "—" || rawPrice === undefined || rawPrice === null
           ? "—"
           : Number(rawPrice);
+
+      useEffect(() => {
+        console.log(`SEARCHSCREEN - TOKEN: ${token} PRICE OBJ:`, priceObj);
+      }, [token, priceObj]);
 
       return (
         <InstrumentRow

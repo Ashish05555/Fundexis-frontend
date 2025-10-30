@@ -240,6 +240,12 @@ function AppContainer() {
   const [showLanding, setShowLanding] = useState(true);
   const { theme } = useTheme();
 
+  // --- DEBUG: Track user state changes ---
+  useEffect(() => {
+    console.log("🟣 App.js: user state changed:", user);
+  }, [user]);
+  // --- END DEBUG ---
+
   useEffect(() => {
     const landingTimeout = setTimeout(() => setShowLanding(false), 1200);
     return () => clearTimeout(landingTimeout);

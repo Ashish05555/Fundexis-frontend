@@ -18,8 +18,8 @@ import { useChallenge } from "../context/ChallengeContext";
 import { db, auth } from "../firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 
+// -- Business logic helpers --
 const GTT_API_ENDPOINT = "/orders/gtt/place";
-
 const TICK = 0.05;
 const format2 = (n) => {
   const val = Number.isFinite(n) ? n : Number(n || 0);
@@ -28,7 +28,6 @@ const format2 = (n) => {
     maximumFractionDigits: 2,
   });
 };
-
 const onlyDigits = (s) => (s ?? "").toString().replace(/\D+/g, "");
 const toInt = (s, fallback = 0) => {
   const n = parseInt(s, 10);
@@ -36,7 +35,6 @@ const toInt = (s, fallback = 0) => {
 };
 const floorToMultiple = (value, step) => Math.max(step, Math.floor(value / step) * step);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
 function safeAlert(title, message) {
   try {
     if (Platform.OS === "web") {
@@ -48,8 +46,6 @@ function safeAlert(title, message) {
     console.warn("Alert:", title, message);
   }
 }
-
-// Remove all keys with value === undefined (Firestore prohibits undefined)
 function withDefined(obj) {
   const out = {};
   for (const [k, v] of Object.entries(obj || {})) {
@@ -57,8 +53,8 @@ function withDefined(obj) {
   }
   return out;
 }
-
 function detectIsEquity(instrument) {
+  if (!instrument) return true;
   const seg = (instrument?.segment || instrument?.type || instrument?.instrument_type || "")
     .toString()
     .toUpperCase();
@@ -77,7 +73,6 @@ function detectIsEquity(instrument) {
   if (ex === "NSE" || ex === "BSE") return true;
   return true;
 }
-
 function deriveLotSize(instrument, isEquity) {
   if (isEquity) return 1;
   const candidates = [
@@ -93,7 +88,6 @@ function deriveLotSize(instrument, isEquity) {
   }
   return 1;
 }
-
 function deriveMaxPerOrderQty(instrument, lotSize, isEquity) {
   const fields = [
     instrument?.freeze_qty,
@@ -110,11 +104,9 @@ function deriveMaxPerOrderQty(instrument, lotSize, isEquity) {
   if (isEquity) return 100000;
   return lotSize * 100;
 }
-
 function defaultProduct(isEquity) {
   return isEquity ? "CNC" : "NRML";
 }
-
 function estimateRequiredFunds({ instrument, side, quantity, limit_price, trigger_price }, ltp) {
   const seg = (instrument?.segment || instrument?.type || instrument?.instrument_type || "").toString().toUpperCase();
   const sym = (instrument?.tradingsymbol || instrument?.symbol || "").toString().toUpperCase();
@@ -134,6 +126,7 @@ export default function GttOrdersScreen({ route, navigation }) {
   const { theme } = useTheme();
   const { selectedChallenge } = useChallenge();
 
+  // Defensive: always define instrument and ltp
   const instrument = route?.params?.instrument || {};
   const availableCash = route?.params?.availableCash;
 
@@ -447,7 +440,6 @@ export default function GttOrdersScreen({ route, navigation }) {
               stop_limit: payload.stop_limit,
               trigger_price: payload.target_trigger,  // primary
               trigger_price2: payload.stop_trigger,   // secondary (so GTTOrderCard shows both)
-              // Optional: keep limit mirrors if you add them to card later
               limit_price: payload.target_limit,
               stop_limit_price: payload.stop_limit,
             });
@@ -458,7 +450,6 @@ export default function GttOrdersScreen({ route, navigation }) {
 
           createdRef.current = { id: docRef.id, ...docToWrite };
         } else {
-          // Fallback if no auth context; still allow UI to navigate with a local object
           createdRef.current = withDefined({
             id: data?.id || data?._id || `gtt_${Date.now()}`,
             type: "GTT",
@@ -511,160 +502,189 @@ export default function GttOrdersScreen({ route, navigation }) {
     }
   };
 
+  // ---- UI redesign ----
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <View style={[topStyles.header, { borderBottomColor: theme.border }]}>
-        <TouchableOpacity
-          style={topStyles.side}
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name="chevron-back" size={24} color={theme.brand} />
-        </TouchableOpacity>
-        <Text style={[topStyles.title, { color: theme.brand }]}>GTT Orders</Text>
-        <View style={topStyles.side} />
+      <View style={gttStyles.headerBg}>
+        <View style={gttStyles.headerBar}>
+          <TouchableOpacity
+            style={gttStyles.backBtn}
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="chevron-back" size={27} color="#fff" />
+          </TouchableOpacity>
+          <Text style={gttStyles.headerTitle}>Create GTT Order</Text>
+        </View>
+        <View style={gttStyles.headerInfoRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={gttStyles.name}>
+              {(instrument?.tradingsymbol || instrument?.symbol || "Instrument").toString().toUpperCase()}
+            </Text>
+            <Text style={gttStyles.exchange}>{instrument?.exchange || "NSE"}</Text>
+          </View>
+          <View style={gttStyles.ltpBox}>
+            <Text style={gttStyles.ltpValue}>
+              {Number.isFinite(ltp) ? `₹${format2(ltp)}` : "—"}
+            </Text>
+          </View>
+        </View>
       </View>
-
       <ScrollView
         style={[styles.container, { backgroundColor: theme.background }]}
         contentContainerStyle={{ paddingBottom: 34 }}
         keyboardShouldPersistTaps="handled"
       >
         <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <View style={styles.cardHeaderRow}>
-            <Ionicons name="sparkles-outline" size={18} color={theme.brand} />
-            <Text style={[styles.cardHeader, { color: theme.brand }]}>Create GTT Order</Text>
+          {/* Order Side */}
+          <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Order Side</Text>
+          <View style={styles.sideRow}>
+            <TouchableOpacity
+              style={[
+                styles.sideBtn,
+                side === "BUY" && styles.sideBuyActive,
+              ]}
+              onPress={() => setSide("BUY")}
+            >
+              <Text style={[styles.sideText, side === "BUY" && styles.sideTextBuyActive]}>BUY</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.sideBtn,
+                side === "SELL" && styles.sideSellActive,
+              ]}
+              onPress={() => setSide("SELL")}
+            >
+              <Text style={[styles.sideText, side === "SELL" && styles.sideTextSellActive]}>SELL</Text>
+            </TouchableOpacity>
           </View>
-
-          <Text style={[styles.instrumentLine, { color: theme.text }]}>
-            {(instrument?.tradingsymbol || instrument?.symbol || "Instrument").toString().toUpperCase()}
-            {instrument?.exchange ? ` (${instrument.exchange})` : ""}
+          {/* Trigger Type */}
+          <Text style={styles.sectionTitle}>
+            Trigger Type <Ionicons name="information-circle-outline" size={15} color={theme.textSecondary} />
           </Text>
-
-          {Number.isFinite(ltp) && (
-            <View style={styles.ltpPill}>
-              <Text style={[styles.ltpLabel, { color: theme.textSecondary }]}>LTP</Text>
-              <Text style={[styles.ltpValue, { color: theme.text }]}>{format2(ltp)}</Text>
-            </View>
-          )}
-
-          <View style={styles.row}>
-            <Text style={[styles.label, { color: theme.textSecondary }]}>Side</Text>
-            <View style={styles.segmentWrap}>
-              <Segment label="BUY" active={side === "BUY"} onPress={() => setSide("BUY")} activeColor={theme.brand} />
-              <Segment label="SELL" active={side === "SELL"} onPress={() => setSide("SELL")} activeColor={theme.error} />
-            </View>
+          <View style={styles.triggerTypeRow}>
+            <TouchableOpacity
+              style={[
+                styles.triggerTypeBtn,
+                triggerType === "single" && styles.triggerTypeBtnActive,
+              ]}
+              onPress={() => setTriggerType("single")}
+            >
+              <Text style={[
+                styles.triggerTypeText,
+                triggerType === "single" && styles.triggerTypeTextActive
+              ]}>Single</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.triggerTypeBtn,
+                triggerType === "oco" && styles.triggerTypeBtnActive,
+                !ocoAllowed && styles.triggerTypeBtnDisabled,
+              ]}
+              onPress={() => ocoAllowed && setTriggerType("oco")}
+              disabled={!ocoAllowed}
+            >
+              <Text style={[
+                styles.triggerTypeText,
+                triggerType === "oco" && styles.triggerTypeTextActive,
+                !ocoAllowed && styles.triggerTypeTextDisabled,
+              ]}>OCO</Text>
+            </TouchableOpacity>
           </View>
-
-          <View style={styles.row}>
-            <Text style={[styles.label, { color: theme.textSecondary }]}>Trigger Type</Text>
-            <View style={styles.segmentWrap}>
-              <Segment label="Single" active={triggerType === "single"} onPress={() => setTriggerType("single")} activeColor={theme.brand} />
-              <Segment label="OCO" active={triggerType === "oco"} onPress={() => setTriggerType("oco")} activeColor={theme.brand} disabled={!ocoAllowed} />
-            </View>
-          </View>
-
-          <View style={styles.rowColumn}>
-            <Text style={[styles.label, { color: theme.textSecondary }]}>Quantity</Text>
-            <Stepper
-              value={qty}
-              onChangeText={handleQtyChangeText}
-              onInc={() => stepQty(true)}
-              onDec={() => stepQty(false)}
-              theme={theme}
-              keyboardType="number-pad"
-              maxLength={7}
-            />
-          </View>
-
-          {triggerType === "single" ? (
-            <>
-              <View style={styles.helpBox}>
-                <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-                  A limit order will be placed when the trigger is hit.
-                </Text>
-              </View>
-              <View style={styles.rowColumn}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Trigger</Text>
-                <Stepper
-                  value={triggerPrice}
-                  onChangeText={setTriggerPrice}
-                  onInc={() => step(setTriggerPrice, triggerPrice, true)}
-                  onDec={() => step(setTriggerPrice, triggerPrice, false)}
-                  theme={theme}
-                  keyboardType="decimal-pad"
+          {/* Quantity */}
+          <Text style={styles.sectionTitle}>Quantity</Text>
+          <View style={styles.boundaryBox}>
+            <View style={styles.quantityRow}>
+              <TouchableOpacity style={styles.quantityBtn} onPress={() => stepQty(false)}>
+                <Text style={styles.quantityBtnText}>-</Text>
+              </TouchableOpacity>
+              <View style={styles.quantityBox}>
+                <TextInput
+                  style={styles.quantityText}
+                  value={qty}
+                  onChangeText={handleQtyChangeText}
+                  keyboardType="numeric"
+                  maxLength={7}
                 />
               </View>
-              <View style={styles.rowColumn}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Limit Price</Text>
-                <Stepper
+              <TouchableOpacity style={styles.quantityBtn} onPress={() => stepQty(true)}>
+                <Text style={styles.quantityBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={styles.quantityNote}>
+            A limit order will be placed when the trigger price is hit
+          </Text>
+          {/* Trigger Price & Limit Price */}
+          {triggerType === "single" ? (
+            <>
+              <Text style={styles.sectionTitle}>Trigger Price</Text>
+              <View style={styles.boundaryBox}>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="Enter trigger price"
+                  value={triggerPrice}
+                  onChangeText={setTriggerPrice}
+                />
+              </View>
+              <Text style={styles.sectionTitle}>Limit Price</Text>
+              <View style={styles.boundaryBox}>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="Enter limit price"
                   value={limitPrice}
                   onChangeText={setLimitPrice}
-                  onInc={() => step(setLimitPrice, limitPrice, true)}
-                  onDec={() => step(setLimitPrice, limitPrice, false)}
-                  theme={theme}
-                  keyboardType="decimal-pad"
                 />
               </View>
             </>
           ) : (
             <>
-              <View style={styles.helpBox}>
-                <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-                  OCO places either target or stop-loss order when respective trigger is hit. The other leg is cancelled automatically.
-                </Text>
-              </View>
-
-              <Text style={[styles.subhead, { color: theme.text }]}>Target</Text>
-              <View style={styles.rowColumn}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Trigger</Text>
-                <Stepper
+              <Text style={styles.subhead}>Target</Text>
+              <Text style={styles.sectionTitle}>Trigger Price</Text>
+              <View style={styles.boundaryBox}>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="Target trigger"
                   value={targetTrigger}
                   onChangeText={setTargetTrigger}
-                  onInc={() => step(setTargetTrigger, targetTrigger, true)}
-                  onDec={() => step(setTargetTrigger, targetTrigger, false)}
-                  theme={theme}
-                  keyboardType="decimal-pad"
                 />
               </View>
-              <View style={styles.rowColumn}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Limit Price</Text>
-                <Stepper
+              <Text style={styles.sectionTitle}>Limit Price</Text>
+              <View style={styles.boundaryBox}>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="Target limit"
                   value={targetLimit}
                   onChangeText={setTargetLimit}
-                  onInc={() => step(setTargetLimit, targetLimit, true)}
-                  onDec={() => step(setTargetLimit, targetLimit, false)}
-                  theme={theme}
-                  keyboardType="decimal-pad"
                 />
               </View>
-
-              <Text style={[styles.subhead, { color: theme.text }]}>Stop-loss</Text>
-              <View style={styles.rowColumn}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Trigger</Text>
-                <Stepper
+              <Text style={styles.subhead}>Stop-loss</Text>
+              <Text style={styles.sectionTitle}>Trigger Price</Text>
+              <View style={styles.boundaryBox}>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="Stop-loss trigger"
                   value={stopTrigger}
                   onChangeText={setStopTrigger}
-                  onInc={() => step(setStopTrigger, stopTrigger, true)}
-                  onDec={() => step(setStopTrigger, stopTrigger, false)}
-                  theme={theme}
-                  keyboardType="decimal-pad"
                 />
               </View>
-              <View style={styles.rowColumn}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Limit Price</Text>
-                <Stepper
+              <Text style={styles.sectionTitle}>Limit Price</Text>
+              <View style={styles.boundaryBox}>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="Stop-loss limit"
                   value={stopLimit}
                   onChangeText={setStopLimit}
-                  onInc={() => step(setStopLimit, stopLimit, true)}
-                  onDec={() => step(setStopLimit, stopLimit, false)}
-                  theme={theme}
-                  keyboardType="decimal-pad"
                 />
               </View>
             </>
           )}
-
           <TouchableOpacity
             onPress={onPlaceGtt}
             activeOpacity={placing ? 1 : 0.85}
@@ -681,8 +701,6 @@ export default function GttOrdersScreen({ route, navigation }) {
             )}
           </TouchableOpacity>
         </View>
-
-        {/* Success modal: tick + title only; OK elongated; instant close */}
         <Modal visible={showPlacedModal} animationType="none" transparent onRequestClose={closePlacedModal}>
           <View style={modalStyles.overlay}>
             <View style={[modalStyles.inner, { backgroundColor: theme.card }]}>
@@ -699,68 +717,67 @@ export default function GttOrdersScreen({ route, navigation }) {
   );
 }
 
-function Segment({ label, active, onPress, activeColor, disabled = false }) {
-  return (
-    <TouchableOpacity
-      onPress={disabled ? undefined : onPress}
-      activeOpacity={disabled ? 1 : 0.9}
-      style={[
-        segStyles.base,
-        { borderColor: disabled ? "#CDD5DF" : activeColor },
-        active && !disabled ? { backgroundColor: activeColor } : null,
-        disabled ? { backgroundColor: "#ECEFF6", opacity: 0.7 } : null,
-      ]}
-    >
-      <Text
-        style={[
-          segStyles.text,
-          active && !disabled ? { color: "#fff" } : { color: disabled ? "#9CA3AF" : activeColor },
-        ]}
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
-function Stepper({ value, onChangeText, onInc, onDec, theme, keyboardType = "decimal-pad", maxLength }) {
-  return (
-    <View style={[stepStyles.wrap, { borderColor: theme.border, backgroundColor: theme.card }]}>
-      <TouchableOpacity style={[stepStyles.btn]} onPress={onDec} activeOpacity={0.8}>
-        <Ionicons name="remove" size={18} color={theme.text} />
-      </TouchableOpacity>
-      <TextInput
-        style={[stepStyles.input, { color: theme.text }]}
-        value={String(value ?? "")}
-        onChangeText={onChangeText}
-        keyboardType={keyboardType}
-        returnKeyType="done"
-        maxLength={maxLength}
-      />
-      <TouchableOpacity style={[stepStyles.btn]} onPress={onInc} activeOpacity={0.8}>
-        <Ionicons name="add" size={18} color={theme.text} />
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-const topStyles = StyleSheet.create({
-  header: {
-    height: 44,
-    paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+// Styles (unchanged from previous response)
+const gttStyles = StyleSheet.create({
+  headerBg: {
+    backgroundColor: "#2540F6",
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    paddingBottom: 18,
+    alignItems: "flex-start",
+  },
+  headerBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    paddingTop: 18,
+    paddingHorizontal: 16,
+    paddingBottom: 7,
+    width: "100%",
   },
-  side: {
-    width: 32,
-    height: 32,
-    alignItems: "center",
-    justifyContent: "center",
+  backBtn: {
+    padding: 5,
+    marginRight: 2,
   },
-  title: {
-    fontSize: 20,
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#fff",
+    marginLeft: 8,
+  },
+  headerInfoRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    width: "100%",
+    marginTop: 2,
+    paddingHorizontal: 16,
+    paddingBottom: 2,
+  },
+  name: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: 0.5,
+  },
+  exchange: {
+    fontSize: 15,
+    color: "#c7d2fe",
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  ltpBox: {
+    alignItems: "flex-end",
+    marginLeft: "auto",
+    flexDirection: "row",
+    gap: 5,
+  },
+  ltpValue: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 17,
+  },
+  subhead: {
+    marginTop: 14,
+    fontSize: 14,
     fontWeight: "800",
     letterSpacing: 0.2,
   },
@@ -768,7 +785,6 @@ const topStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 14 },
-
   card: {
     borderRadius: 14,
     borderWidth: 1,
@@ -777,60 +793,142 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
   },
-  cardHeaderRow: {
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#232323",
+    marginBottom: 11,
+    marginTop: 13,
+  },
+  sideRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 7,
+    marginTop: -6,
+  },
+  sideBtn: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 2,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    paddingVertical: 13,
+    elevation: 1,
+    borderColor: "#e3e3e3",
+  },
+  sideBuyActive: {
+    backgroundColor: "#e6fdee",
+    borderColor: "#16c784",
+  },
+  sideSellActive: {
+    backgroundColor: "#ffeaea",
+    borderColor: "#f44336",
+  },
+  sideText: {
+    fontSize: 16,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    color: "#232323",
+  },
+  sideTextBuyActive: {
+    color: "#16c784",
+  },
+  sideTextSellActive: {
+    color: "#f44336",
+  },
+  triggerTypeRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 7,
+    marginTop: -6,
+  },
+  triggerTypeBtn: {
+    flex: 1,
+    borderRadius: 8,
+    backgroundColor: "#f6f7fb",
+    alignItems: "center",
+    paddingVertical: 13,
+    elevation: 1,
+  },
+  triggerTypeBtnActive: {
+    backgroundColor: "#2540F6",
+  },
+  triggerTypeBtnDisabled: {
+    opacity: 0.5,
+  },
+  triggerTypeText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#232323",
+    letterSpacing: 0.3,
+  },
+  triggerTypeTextActive: {
+    color: "#fff",
+  },
+  triggerTypeTextDisabled: {
+    color: "#bdbdbd",
+  },
+  boundaryBox: {
+    backgroundColor: "#f2f3f7",
+    borderRadius: 9,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    marginBottom: 7,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+    width: "100%",
+  },
+  quantityRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 7,
+    marginTop: -6,
   },
-  cardHeader: {
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  instrumentLine: {
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-  ltpPill: {
-    flexDirection: "row",
-    alignSelf: "flex-start",
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    backgroundColor: "#0000000F",
-    marginBottom: 6,
-  },
-  ltpLabel: { fontSize: 12, marginRight: 6, fontWeight: "600" },
-  ltpValue: { fontSize: 12, fontWeight: "700" },
-
-  row: { marginTop: 10 },
-  rowColumn: { marginTop: 10 },
-  label: {
-    fontSize: 12.5,
-    fontWeight: "700",
-    marginBottom: 6,
-    letterSpacing: 0.2,
-  },
-  segmentWrap: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  subhead: {
-    marginTop: 14,
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
-  helpBox: {
-    marginTop: 8,
-    padding: 10,
+  quantityBtn: {
+    backgroundColor: "#f6f7fb",
     borderRadius: 8,
-    backgroundColor: "#0000000A",
+    padding: 8,
+    width: 38,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  helpText: {
-    fontSize: 12,
-    lineHeight: 18,
+  quantityBtnText: {
+    fontSize: 21,
+    fontWeight: "700",
+    color: "#232323",
+  },
+  quantityBox: {
+    backgroundColor: "#f9f9fd",
+    borderRadius: 8,
+    flex: 1,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quantityText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#232323",
+    textAlign: "center",
+  },
+  quantityNote: {
+    fontSize: 12.5,
+    color: "#888",
+    marginTop: 2,
+    marginBottom: 2,
+    marginLeft: 2,
+  },
+  input: {
+    marginTop: 4,
+    backgroundColor: "transparent",
+    borderRadius: 8,
+    padding: 13,
+    fontSize: 17,
+    color: "#232323",
+    fontWeight: "600",
+    borderWidth: 0,
+    marginBottom: 3,
   },
   placeBtn: {
     marginTop: 16,
@@ -844,43 +942,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 16,
     letterSpacing: 0.3,
-  },
-});
-
-const segStyles = StyleSheet.create({
-  base: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 2,
-    minWidth: 88,
-    alignItems: "center",
-  },
-  text: {
-    fontSize: 13.5,
-    fontWeight: "800",
-  },
-});
-
-const stepStyles = StyleSheet.create({
-  wrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 10,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  btn: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  input: {
-    flex: 1,
-    textAlign: "center",
-    paddingVertical: 10,
-    fontSize: 16,
-    fontWeight: "700",
-    minWidth: 80,
   },
 });
 
@@ -914,7 +975,7 @@ const modalStyles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 16,
     paddingHorizontal: 28,
-    minWidth: 200, // elongated width as requested
+    minWidth: 200,
     alignItems: "center",
     justifyContent: "center",
   },

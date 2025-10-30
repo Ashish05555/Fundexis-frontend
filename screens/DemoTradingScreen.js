@@ -959,33 +959,45 @@ export default function DemoTradingScreen() {
 
   function renderAccountDashboard() {
     if (!selectedChallenge) return null;
-    const profitValue = (account?.balance ?? 0) + liveTotalActivePNL - (selectedChallenge?.phaseStartBalance ?? 0);
-    const pnlColor = profitValue > 0 ? "#388e3c" : profitValue < 0 ? "#e53935" : theme.textSecondary;
-    const pnlDisplay = profitValue > 0 ? `+${format2(profitValue)}` : format2(profitValue);
+    
+    // Calculate values based on screenshot
+    const challengeAmount = selectedChallenge?.phaseStartBalance ?? 500000;
+    const currentBalance = liveBalance;
+    const phase1Target = selectedChallenge?.profitTarget ?? 50000;
+    const phase1Pnl = (account?.balance ?? 0) + liveTotalActivePNL - challengeAmount;
+    
+    const pnlColor = phase1Pnl > 0 ? "#22b573" : phase1Pnl < 0 ? "#e53935" : "#000000";
+    const pnlDisplay = phase1Pnl > 0 ? `+${format2(phase1Pnl)}` : format2(phase1Pnl);
 
     return (
-      <View style={[styles.statusCard, { backgroundColor: theme.card, shadowColor: theme.brand + "22" }]}>
-        <View style={styles.statusRow}>
-          <View>
-            <Text style={[styles.sectionHeader, { color: theme.brand }]}>Account Status</Text>
-            <Text style={[styles.challengeName, { color: theme.sectionTitle }]}>
-              <Text style={[styles.statusLabel, { color: theme.textSecondary }]}>Challenge: </Text>
-              {(selectedChallenge?.phaseStartBalance ?? 0).toLocaleString()}
-            </Text>
-            <Text style={[styles.challengeName, { color: theme.sectionTitle }]}>
-              <Text style={[styles.statusLabel, { color: theme.textSecondary }]}>Phase: </Text>
-              {selectedChallenge?.fundedAccountNumber ? "Funded" : (selectedChallenge?.phase ?? 1)}
-            </Text>
-            <Text style={[styles.challengeName, { color: theme.sectionTitle }]}>
-              <Text style={[styles.statusLabel, { color: theme.textSecondary }]}>Target: </Text>
-              {(selectedChallenge?.profitTarget ?? 0).toLocaleString()}
-            </Text>
+      <View style={styles.accountStatusCard}>
+        <Text style={styles.accountStatusHeader}>ACCOUNT STATUS</Text>
+        
+        <View style={styles.accountStatusContent}>
+          {/* Left Column */}
+          <View style={styles.accountStatusLeft}>
+            <View style={styles.statusItem}>
+              <Text style={styles.statusItemLabel}>Challenge</Text>
+              <Text style={styles.statusItemValue}>₹{challengeAmount.toLocaleString()}</Text>
+            </View>
+            
+            <View style={styles.statusItem}>
+              <Text style={styles.statusItemLabel}>Phase 1</Text>
+              <Text style={styles.statusItemValue}>Target: ₹{phase1Target.toLocaleString()}</Text>
+            </View>
           </View>
-          <View style={styles.balanceCol}>
-            <Text style={[styles.balanceLabel, { color: theme.brand }]}>Balance:</Text>
-            <Text style={[styles.balanceValue, { color: theme.brand }]}>{format2(liveBalance)}</Text>
-            <Text style={[styles.profitLabel, { color: theme.brand }, { marginTop: 5 }]}>P&L:</Text>
-            <Text style={[styles.profitValue, { color: pnlColor }, { fontWeight: "bold" }]}>{pnlDisplay}</Text>
+
+          {/* Right Column */}
+          <View style={styles.accountStatusRight}>
+            <View style={styles.statusItem}>
+              <Text style={styles.statusItemLabel}>Balance</Text>
+              <Text style={[styles.statusItemValue, styles.balanceValue]}>{format2(currentBalance)}</Text>
+            </View>
+            
+            <View style={styles.statusItem}>
+              <Text style={styles.statusItemLabel}>P&L</Text>
+              <Text style={[styles.statusItemValue, styles.pnlValue, { color: pnlColor }]}>{pnlDisplay}</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -1020,11 +1032,16 @@ export default function DemoTradingScreen() {
           style={{
             flexDirection: "row",
             alignItems: "center",
-            backgroundColor: theme.card,
+            backgroundColor: 'white',
             borderRadius: 10,
             borderWidth: 1,
-            borderColor: theme.border,
+            borderColor: "#E5E7EB",
             padding: 12,
+            shadowColor: "#000",
+            shadowOpacity: 0.08,
+            shadowRadius: 12,
+            shadowOffset: { width: 0, height: 4 },
+            elevation: 3,
           }}
           onPress={() => setShowSearch(true)}
           activeOpacity={0.7}
@@ -1357,13 +1374,14 @@ const styles = StyleSheet.create({
     borderColor: "#1740FF",
     borderWidth: 2,
     gap: 10,
-    maxWidth: "92%",
+    maxWidth: "80%",
+    minWidth: "70%",
   },
   selectorBtnText: {
     fontWeight: "bold",
     fontSize: 16,
     color: "#1c38d4",
-    maxWidth: "86%",
+    flex: 1,
   },
   modalOverlay: {
     flex: 1,
@@ -1481,7 +1499,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: "center",
-    elevation: 0,
+    backgroundColor: 'white',
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
   },
   totalPnlLabel: {
     fontSize: 13,
@@ -1562,5 +1587,62 @@ const styles = StyleSheet.create({
   },
   tabBarText: {
     fontSize: 16,
+  },
+  // Account Dashboard Styles
+  accountStatusCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  accountStatusHeader: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#1976d2',
+    marginBottom: 12,
+    letterSpacing: 0.5,
+  },
+  accountStatusContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  accountStatusLeft: {
+    flex: 1,
+  },
+  accountStatusRight: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  statusItem: {
+    marginBottom: 8,
+  },
+  statusItemLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  statusItemValue: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  balanceValue: {
+    color: '#1976d2',
+    fontSize: 16,
+  },
+  pnlValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

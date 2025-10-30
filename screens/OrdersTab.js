@@ -174,12 +174,14 @@ export default function OrdersTab({
             id: docSnap.id,
             challengeId,
             status: data.status || "—",
-            type: data.type || "REGULAR",
+            // FIXED: Extract orderType properly from Firestore (LIMIT or MARKET)
+            orderType: data.orderType || data.order_type || data.variety || "MARKET",
             variety: data.variety || "NORMAL",
+            type: data.type || "REGULAR",
             createdAt: data.createdAt,
             scheduledFor: data.scheduledFor,
             product: data.product,
-            order_type: data.order_type,
+            product_type: data.product || data.product_type || "NRML",
             exchange: data.exchange,
             margin: data.margin,
             charges: data.charges,
@@ -197,7 +199,6 @@ export default function OrdersTab({
             symbol: data.tradingsymbol || data.symbol || "",
             side: data.side || data.transaction_type || "BUY",
             quantity: data.quantity,
-            product_type: data.product || data.product_type || "NRML",
             slActive: data.slActive,
           };
         });
@@ -241,7 +242,6 @@ export default function OrdersTab({
             isToday(o.executedAt || o.updatedAt || o.createdAt)
         );
       case "cancelled":
-        // DO NOT EXCLUDE GTT orders here!
         return orders.filter(
           (o) =>
             ["CANCELLED", "CANCELED", "REJECTED", "FAILED"].includes(
@@ -251,7 +251,6 @@ export default function OrdersTab({
             isToday(o.cancelledAt || o.updatedAt || o.createdAt)
         );
       case "gtt":
-        // Only show GTT orders that are not cancelled
         return orders.filter(
           (o) =>
             ((o.type && o.type.toUpperCase() === "GTT") || o.gtt === true) &&
@@ -297,7 +296,6 @@ export default function OrdersTab({
     });
   };
 
-  // GTT-specific navigation: Go to GttOrdersScreen with isModify param
   const navigateToGTTOrderScreen = (order) => {
     const symbol = order?.tradingsymbol || order?.symbol || "";
     const meta =
@@ -368,7 +366,9 @@ export default function OrdersTab({
     }
   };
 
+  // Pass orderType as both orderType and order_type (for compatibility with card)
   const renderOrderRow = ({ item }) => {
+    const orderTypeValue = item.orderType || item.order_type || item.variety || "MARKET";
     if (activeTab === "executed") {
       return (
         <ExecutedOrderCard
@@ -385,7 +385,8 @@ export default function OrdersTab({
             symbol: item.tradingsymbol || item.symbol,
             exchange: item.exchange,
             product_type: item.product_type || "NRML",
-            order_type: item.order_type || item.variety || "MARKET",
+            orderType: orderTypeValue,
+            order_type: orderTypeValue,
           }}
         />
       );
@@ -404,7 +405,8 @@ export default function OrdersTab({
             symbol: item.tradingsymbol || item.symbol,
             exchange: item.exchange,
             product_type: item.product_type || "NRML",
-            order_type: item.order_type || item.variety || "MARKET",
+            orderType: orderTypeValue,
+            order_type: orderTypeValue,
             isAMO: item.variety === "AMO",
             type: item.type,
             gtt: item.gtt,
@@ -426,6 +428,8 @@ export default function OrdersTab({
             status: openStatus,
             isAMO,
             order_variety: item.variety || "REGULAR",
+            orderType: orderTypeValue,
+            order_type: orderTypeValue,
             slActive,
             trigger_price: triggerPrice,
             stop_limit_price: stoplimitPrice,
@@ -457,7 +461,11 @@ export default function OrdersTab({
     if (activeTab === "gtt") {
       return (
         <GTTOrderCard
-          order={item}
+          order={{
+            ...item,
+            orderType: orderTypeValue,
+            order_type: orderTypeValue,
+          }}
           livePrice={item.livePrice}
           inlineConfirm
           onModify={() => navigateToGTTOrderScreen(item)}

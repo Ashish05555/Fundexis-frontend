@@ -6,83 +6,49 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
-  Image,
   LayoutAnimation,
   Platform,
   UIManager,
   Linking,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { useTheme } from "../context/ThemeContext";
-import { useFonts } from "expo-font";
+import { LinearGradient } from "expo-linear-gradient";
 
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// Support email for the app
 const SUPPORT_EMAIL = "support@fundexis.in";
 
-export default function ProfileScreen({ setUser, navigation }) {
-  const { theme } = useTheme();
-
-  // Load vector-icon fonts first to prevent incorrect glyphs/flicker on first paint (especially on web)
-  const [iconsReady] = useFonts({
-    ...Ionicons.font,
-    ...MaterialIcons.font,
-  });
-
-  // Render placeholder box while icon fonts are loading to keep layout stable
-  const IconPlaceholder = ({ size = 22 }) => (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 6,
-        backgroundColor: theme.card,
-        borderWidth: 1,
-        borderColor: theme.border,
-      }}
-    />
-  );
-  const IIcon = (props) =>
-    iconsReady ? (
-      <Ionicons {...props} />
-    ) : (
-      <IconPlaceholder size={props.size} />
-    );
-  const MIcon = (props) =>
-    iconsReady ? (
-      <MaterialIcons {...props} />
-    ) : (
-      <IconPlaceholder size={props.size} />
-    );
+export default function ProfileScreen({ setUser }) {
+  const navigation = useNavigation();
 
   const [profile, setProfile] = useState({ name: "", email: "" });
   const [bankStatus, setBankStatus] = useState("");
   const [bankError, setBankError] = useState("");
   const [bankDetails, setBankDetails] = useState({ account: "", ifsc: "" });
   const [kycStatus, setKycStatus] = useState("");
-  const [openSection, setOpenSection] = useState(""); // "account", "kyc", "bank", "payout", "help", "legal"
+  const [openSection, setOpenSection] = useState("");
 
   useFocusEffect(
     useCallback(() => {
+      let mounted = true;
+      console.log("[ProfileScreen] useFocusEffect: Fetching profile...");
       const fetchProfile = async () => {
         const currUser = auth.currentUser;
+        console.log("[ProfileScreen] Current Firebase user:", currUser);
         if (currUser) {
           try {
-            // Fetch user profile from Firestore
             const userDocRef = doc(db, "users", currUser.uid);
             const userDoc = await getDoc(userDocRef);
+            if (!mounted) return;
             if (userDoc.exists()) {
-              const data = userDoc.data();
+              const data = userDoc.data() || {};
+              console.log("[ProfileScreen] Firestore user profile:", data);
               setProfile({
                 name: data.name || currUser.displayName || "",
                 email: data.email || currUser.email || "",
@@ -100,35 +66,78 @@ export default function ProfileScreen({ setUser, navigation }) {
               setBankError("");
               setBankDetails({ account: "", ifsc: "" });
               setKycStatus("");
+              console.log("[ProfileScreen] Firestore userDoc does not exist, using Firebase user only");
             }
           } catch (e) {
-            setProfile({ name: currUser.displayName || "", email: currUser.email || "" });
+            // fallback to auth profile on error
+            console.error("[ProfileScreen] Error fetching Firestore userDoc:", e);
+            const currUser = auth.currentUser;
+            if (!mounted) return;
+            setProfile({ name: currUser?.displayName || "", email: currUser?.email || "" });
             setBankStatus("");
             setBankError("");
             setBankDetails({ account: "", ifsc: "" });
             setKycStatus("");
           }
+        } else {
+          console.log("[ProfileScreen] No user signed in.");
         }
       };
+
       fetchProfile();
+
+      return () => {
+        mounted = false;
+        console.log("[ProfileScreen] useFocusEffect cleanup.");
+      };
     }, [])
   );
 
   const handleSectionPress = (section) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setOpenSection(openSection === section ? "" : section);
-  };
-
-  const handleLogout = async () => {
     try {
-      await signOut(auth);
-      setUser(null);
-    } catch (error) {
-      Alert.alert("Logout Failed", error.message);
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    } catch (e) {
+      // ignore if animation unavailable
+      console.warn("[ProfileScreen] LayoutAnimation error:", e);
     }
+    setOpenSection((prev) => (prev === section ? "" : section));
+    console.log(`[ProfileScreen] Section toggled: ${section} (now open: ${openSection === section ? "" : section})`);
   };
 
-  // Open email composer to contact support (robust for web + native)
+  // ---- LOGOUT FIX and LOGS ----
+  const handleLogout = async () => {
+    console.log("[ProfileScreen] Logout button pressed.");
+    Alert.alert("Logout", "Are you sure you want to logout?", [
+      {
+        text: "Cancel",
+        style: "cancel",
+        onPress: () => console.log("[ProfileScreen] Logout cancelled by user."),
+      },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            console.log("[ProfileScreen] Proceeding with Firebase signOut...");
+            await signOut(auth);
+            console.log("[ProfileScreen] Firebase signOut completed.");
+            if (typeof setUser === "function") {
+              setUser(null);
+              console.log("[ProfileScreen] Called setUser(null) to clear app state.");
+            } else {
+              console.warn("[ProfileScreen] setUser is not a function!");
+            }
+            // App.js should switch to SignIn automatically now.
+            console.log("[ProfileScreen] Logout flow complete. App.js should now show SignIn.");
+          } catch (error) {
+            console.error("[ProfileScreen] Logout error:", error);
+            Alert.alert("Logout Failed", error?.message || "An error occurred during logout. Please try again.");
+          }
+        },
+      },
+    ]);
+  };
+
   const openSupportEmail = async () => {
     const subject = encodeURIComponent("Support request from Fundexis app");
     const body = encodeURIComponent(
@@ -143,39 +152,7 @@ Thanks,`
     );
 
     const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-      SUPPORT_EMAIL
-    )}&su=${subject}&body=${body}`;
-
     try {
-      if (Platform.OS === "web") {
-        // Try to use the user's default mail handler in the same tab (avoids popup blockers).
-        window.location.href = mailtoUrl;
-
-        // If the browser stays on the page (no handler), try Gmail after a short delay.
-        setTimeout(async () => {
-          if (document.visibilityState === "visible") {
-            // Copy email to clipboard for convenience (best-effort).
-            try {
-              if (navigator?.clipboard?.writeText) {
-                await navigator.clipboard.writeText(SUPPORT_EMAIL);
-              }
-            } catch {}
-
-            // Open Gmail compose as a fallback.
-            window.open(gmailUrl, "_blank", "noopener,noreferrer");
-
-            // Optional notice for the user.
-            Alert.alert(
-              "Email",
-              `If your email app did not open, we opened Gmail compose in a new tab. You can also email us at ${SUPPORT_EMAIL} (copied to clipboard).`
-            );
-          }
-        }, 700);
-        return;
-      }
-
-      // Native (iOS/Android)
       const canOpen = await Linking.canOpenURL(mailtoUrl);
       if (canOpen) {
         await Linking.openURL(mailtoUrl);
@@ -183,319 +160,327 @@ Thanks,`
         Alert.alert("Email app not found", `Please email us at ${SUPPORT_EMAIL}`);
       }
     } catch (e) {
-      // Last resort fallback on any platform
-      try {
-        if (Platform.OS === "web") {
-          window.open(gmailUrl, "_blank", "noopener,noreferrer");
-        } else {
-          Alert.alert("Unable to open email", `Please email us at ${SUPPORT_EMAIL}`);
-        }
-      } catch {
-        Alert.alert("Unable to open email", `Please email us at ${SUPPORT_EMAIL}`);
-      }
+      Alert.alert("Unable to open email", `Please email us at ${SUPPORT_EMAIL}`);
     }
   };
 
-  // Color helpers for status pills
-  const kycStatusColor =
-    kycStatus === "verified"
-      ? theme.statusVerified || "#22b573"
-      : kycStatus === "pending"
-      ? theme.statusPending || "#f39c12"
-      : kycStatus === "rejected"
-      ? theme.statusRejected || theme.error
-      : theme.textSecondary;
+  const calculateCompletion = () => {
+    let completed = 0;
+    const total = 4;
+    if (profile.name && profile.email) completed++;
+    if (kycStatus === "verified") completed++;
+    if (bankStatus === "verified") completed++;
+    if (bankDetails.account && bankDetails.ifsc) completed++;
+    return Math.round((completed / total) * 100);
+  };
+  const completionPercentage = calculateCompletion();
 
-  const bankStatusColor =
-    bankStatus === "verified"
-      ? theme.statusVerified || "#22b573"
-      : bankStatus === "pending"
-      ? theme.statusPending || "#f39c12"
-      : bankStatus === "rejected"
-      ? theme.statusRejected || theme.error
-      : theme.textSecondary;
+  const StatusBadge = ({ status, type = "kyc" }) => {
+    let bgColor, textColor, icon, label;
+    if (status === "verified") {
+      bgColor = "#D1FAE5";
+      textColor = "#059669";
+      icon = "checkmark-circle";
+      label = "Completed";
+    } else if (status === "pending") {
+      bgColor = "#FEF3C7";
+      textColor = "#D97706";
+      icon = "time";
+      label = "Pending";
+    } else if (status === "rejected") {
+      bgColor = "#FEE2E2";
+      textColor = "#DC2626";
+      icon = "close-circle";
+      label = "Rejected";
+    } else {
+      bgColor = "#F3F4F6";
+      textColor = "#6B7280";
+      icon = "ellipse";
+      label = type === "kyc" ? "Not Submitted" : "Not Linked";
+    }
+    return (
+      <View style={[styles.statusBadge, { backgroundColor: bgColor }]}>
+        <Ionicons name={icon} size={14} color={textColor} />
+        <Text style={[styles.statusBadgeText, { color: textColor }]}>{label}</Text>
+      </View>
+    );
+  };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 48 }}>
-        {/* Header Gradient Card */}
-        <View style={[styles.headerCard, { backgroundColor: theme.card, shadowColor: theme.brand + "22" }]}>
-          <View style={[styles.avatarCircle, { backgroundColor: theme.header, shadowColor: theme.brand }]}>
-            <Image
-              source={require("../assets/app-icon.png")}
-              style={styles.headerIcon}
-              resizeMode="contain"
-            />
-          </View>
-          <View style={styles.headerTextContainer}>
-            <Text style={[styles.headerAppName, { color: theme.brand }]}>{profile.name || "Fundexis User"}</Text>
-            <Text style={[styles.headerEmail, { color: theme.textSecondary }]}>{profile.email}</Text>
-          </View>
-        </View>
-
-        {/* Account Details */}
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <TouchableOpacity
-            style={styles.sectionHeaderRow}
-            activeOpacity={0.82}
-            onPress={() => handleSectionPress("account")}
-          >
-            <IIcon name="person-circle-outline" size={22} color={theme.sectionTitle} />
-            <Text style={[styles.sectionHeaderText, { color: theme.sectionTitle }]}>Account Details</Text>
-            <View style={{ flex: 1 }} />
-            <IIcon
-              name={openSection === "account" ? "chevron-up" : "chevron-down"}
-              size={20}
-              color={theme.sectionTitle}
-            />
+    <View style={styles.container}>
+      <LinearGradient colors={["#2563EB", "#1E40AF"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.gradientHeader}>
+        <View style={styles.headerTopRow}>
+          <Text style={styles.headerTitle}>Profile</Text>
+          <TouchableOpacity style={styles.editButton} activeOpacity={0.7}>
+            <Ionicons name="create-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.editButtonText}>Edit Profile</Text>
           </TouchableOpacity>
-          {openSection === "account" && (
-            <View style={styles.subSection}>
-              <View style={styles.detailRow}>
-                <Text style={[styles.detailLabel, { color: theme.sectionTitle }]}>Name</Text>
-                <Text style={[styles.detailValue, { color: theme.textSecondary }]}>{profile.name}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={[styles.detailLabel, { color: theme.sectionTitle }]}>Email</Text>
-                <Text style={[styles.detailValue, { color: theme.textSecondary }]}>{profile.email}</Text>
+        </View>
+        <View style={styles.avatarHeaderContainer}>
+          <LinearGradient
+            colors={["#2563EB", "#1E40AF", "#4F8FFF"]}
+            start={{ x: 0.1, y: 0.1 }}
+            end={{ x: 0.8, y: 1 }}
+            style={styles.avatarCircle}
+          >
+            <Text style={styles.avatarText}>{profile.name ? profile.name.charAt(0).toUpperCase() : "F"}</Text>
+          </LinearGradient>
+        </View>
+      </LinearGradient>
+
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.profileCard}>
+          <View style={styles.profileCardContent}>
+            <View style={styles.profileInfo}>
+              <Text style={styles.profileName}>{profile.name || "Fundexis User"}</Text>
+              <Text style={styles.profileEmail}>{profile.email}</Text>
+              <View style={styles.completionSection}>
+                <View style={styles.completionHeader}>
+                  <Text style={styles.completionLabel}>Profile Completion</Text>
+                  <Text style={styles.completionPercentage}>{completionPercentage}%</Text>
+                </View>
+                <View style={styles.progressBarContainer}>
+                  <View style={[styles.progressBarFill, { width: `${completionPercentage}%` }]} />
+                </View>
+                <Text style={styles.completionHint}>Complete your profile to unlock all features</Text>
               </View>
             </View>
-          )}
-        </View>
-
-        {/* KYC / Verification */}
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <TouchableOpacity
-            style={styles.sectionHeaderRow}
-            activeOpacity={0.82}
-            onPress={() => handleSectionPress("kyc")}
-          >
-            <MIcon name="verified-user" size={22} color={theme.sectionTitle} />
-            <Text style={[styles.sectionHeaderText, { color: theme.sectionTitle }]}>KYC / Verification</Text>
-            <View style={{ flex: 1 }} />
-            <Text style={[styles.kycStatus, { color: kycStatusColor }]}>
-              {kycStatus === "verified"
-                ? "Verified"
-                : kycStatus === "pending"
-                ? "Pending"
-                : kycStatus === "rejected"
-                ? "Rejected"
-                : "Not Submitted"}
-            </Text>
-            <IIcon
-              name={openSection === "kyc" ? "chevron-up" : "chevron-down"}
-              size={20}
-              color={theme.sectionTitle}
-              style={{ marginLeft: 5 }}
-            />
-          </TouchableOpacity>
-          {openSection === "kyc" && (
-            <View style={styles.subSection}>
-              <TouchableOpacity
-                style={[styles.subOption, { backgroundColor: theme.background }]}
-                onPress={() => navigation.navigate("KycScreen")}
-              >
-                <Text style={[styles.subOptionText, { color: theme.brand }]}>
-                  {kycStatus === "verified" ? "View/Update KYC" : "Complete Your KYC"}
-                </Text>
-                <IIcon name="arrow-forward" size={18} color={theme.sectionTitle} />
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-
-        {/* Bank & Payment */}
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <TouchableOpacity
-            style={styles.sectionHeaderRow}
-            activeOpacity={0.82}
-            onPress={() => handleSectionPress("bank")}
-          >
-            <IIcon name="card-outline" size={22} color={theme.sectionTitle} />
-            <Text style={[styles.sectionHeaderText, { color: theme.sectionTitle }]}>Bank & Payment</Text>
-            <View style={{ flex: 1 }} />
-            <Text style={[styles.bankStatus, { color: bankStatusColor }]}>
-              {bankStatus === "verified"
-                ? "Verified"
-                : bankStatus === "pending"
-                ? "Pending"
-                : bankStatus === "rejected"
-                ? "Rejected"
-                : "Not Linked"}
-            </Text>
-            <IIcon
-              name={openSection === "bank" ? "chevron-up" : "chevron-down"}
-              size={20}
-              color={theme.sectionTitle}
-              style={{ marginLeft: 5 }}
-            />
-          </TouchableOpacity>
-          {openSection === "bank" && (
-            <View style={styles.subSection}>
-              {bankStatus === "verified" && (
-                <>
-                  <View style={styles.detailRow}>
-                    <Text style={[styles.detailLabel, { color: theme.sectionTitle }]}>Account</Text>
-                    <Text style={[styles.detailValue, { color: theme.textSecondary }]}>{bankDetails.account}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={[styles.detailLabel, { color: theme.sectionTitle }]}>IFSC</Text>
-                    <Text style={[styles.detailValue, { color: theme.textSecondary }]}>{bankDetails.ifsc}</Text>
-                  </View>
-                </>
-              )}
-              <TouchableOpacity
-                style={[styles.subOption, { backgroundColor: theme.background }]}
-                onPress={() => navigation.navigate("BankAccountScreen")}
-              >
-                <Text style={[styles.subOptionText, { color: theme.brand }]}>
-                  {bankStatus === "verified" ? "View/Change Bank Account" : "Add/Verify Bank Account"}
-                </Text>
-                <IIcon name="arrow-forward" size={18} color={theme.sectionTitle} />
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-
-        {/* Payout */}
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <TouchableOpacity
-            style={styles.sectionHeaderRow}
-            activeOpacity={0.82}
-            onPress={() => handleSectionPress("payout")}
-          >
-            <IIcon name="cash-outline" size={22} color={theme.sectionTitle} />
-            <Text style={[styles.sectionHeaderText, { color: theme.sectionTitle }]}>Payout</Text>
-            <View style={{ flex: 1 }} />
-            <IIcon
-              name={openSection === "payout" ? "chevron-up" : "chevron-down"}
-              size={20}
-              color={theme.sectionTitle}
-            />
-          </TouchableOpacity>
-          {openSection === "payout" && (
-            <View style={styles.subSection}>
-              <TouchableOpacity
-                style={[styles.subOption, { backgroundColor: theme.background }]}
-                onPress={() => navigation.navigate("PayoutScreen")}
-              >
-                <Text style={[styles.subOptionText, { color: theme.brand }]}>Request a Payout</Text>
-                <IIcon name="arrow-forward" size={18} color={theme.sectionTitle} />
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-
-        {/* Settings */}
-        <TouchableOpacity
-          style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.border }]}
-          activeOpacity={0.82}
-          onPress={() => navigation.navigate("SettingsScreen")}
-        >
-          <View style={styles.sectionHeaderRow}>
-            <IIcon name="settings-outline" size={22} color={theme.sectionTitle} />
-            <Text style={[styles.sectionHeaderText, { color: theme.sectionTitle }]}>Settings</Text>
-            <View style={{ flex: 1 }} />
-            <IIcon name="chevron-forward" size={20} color={theme.sectionTitle} />
           </View>
-        </TouchableOpacity>
-
-        {/* Help & Support */}
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <TouchableOpacity
-            style={styles.sectionHeaderRow}
-            activeOpacity={0.82}
-            onPress={() => handleSectionPress("help")}
-          >
-            <IIcon name="help-circle-outline" size={22} color={theme.sectionTitle} />
-            <Text style={[styles.sectionHeaderText, { color: theme.sectionTitle }]}>Help & Support</Text>
-            <View style={{ flex: 1 }} />
-            <IIcon
-              name={openSection === "help" ? "chevron-up" : "chevron-down"}
-              size={20}
-              color={theme.sectionTitle}
-            />
-          </TouchableOpacity>
-          {openSection === "help" && (
-            <View style={styles.subSection}>
-              <TouchableOpacity
-                style={[styles.subOption, { backgroundColor: theme.background }]}
-                onPress={() => navigation.navigate("FAQScreen")}
-              >
-                <Text style={[styles.subOptionText, { color: theme.brand }]}>FAQ / Help Center</Text>
-                <IIcon name="arrow-forward" size={18} color={theme.sectionTitle} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.subOption, { backgroundColor: theme.background }]}
-                onPress={openSupportEmail}
-              >
-                <Text style={[styles.subOptionText, { color: theme.brand }]}>Contact Support (Email)</Text>
-                <IIcon name="arrow-forward" size={18} color={theme.sectionTitle} />
-              </TouchableOpacity>
-            </View>
-          )}
         </View>
 
-        {/* Legal */}
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <TouchableOpacity
-            style={styles.sectionHeaderRow}
-            activeOpacity={0.82}
-            onPress={() => handleSectionPress("legal")}
-          >
-            <IIcon name="document-text-outline" size={22} color={theme.sectionTitle} />
-            <Text style={[styles.sectionHeaderText, { color: theme.sectionTitle }]}>Legal</Text>
-            <View style={{ flex: 1 }} />
-            <IIcon
-              name={openSection === "legal" ? "chevron-up" : "chevron-down"}
-              size={20}
-              color={theme.sectionTitle}
-            />
-          </TouchableOpacity>
-          {openSection === "legal" && (
-            <View style={styles.subSection}>
-              <TouchableOpacity
-                style={[styles.subOption, { backgroundColor: theme.background }]}
-                onPress={() => navigation.navigate("TermsScreen")}
-              >
-                <Text style={[styles.subOptionText, { color: theme.brand }]}>Terms & Conditions</Text>
-                <IIcon name="arrow-forward" size={18} color={theme.sectionTitle} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.subOption, { backgroundColor: theme.background }]}
-                onPress={() => navigation.navigate("PrivacyScreen")}
-              >
-                <Text style={[styles.subOptionText, { color: theme.brand }]}>Privacy Policy</Text>
-                <IIcon name="arrow-forward" size={18} color={theme.sectionTitle} />
-              </TouchableOpacity>
+        <View style={styles.menuSection}>
+          <TouchableOpacity style={styles.menuCard} activeOpacity={0.9} onPress={() => handleSectionPress("account")}>
+            <View style={styles.menuCardContent}>
+              <View style={styles.iconContainer}>
+                <Ionicons name="person-circle-outline" size={24} color="#2563EB" />
+              </View>
+              <View style={styles.menuTextContainer}>
+                <View style={styles.menuTitleRow}>
+                  <Text style={styles.menuTitle}>Account Details</Text>
+                  <StatusBadge status="verified" />
+                </View>
+                <Text style={styles.menuDescription}>Manage your personal information</Text>
+              </View>
+              <Ionicons name={openSection === "account" ? "chevron-up" : "chevron-down"} size={20} color="#9CA3AF" />
             </View>
-          )}
+            {openSection === "account" && (
+              <View style={styles.expandedContent}>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Name</Text>
+                  <Text style={styles.detailValue}>{profile.name}</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Email</Text>
+                  <Text style={styles.detailValue}>{profile.email}</Text>
+                </View>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuCard} activeOpacity={0.9} onPress={() => handleSectionPress("kyc")}>
+            <View style={styles.menuCardContent}>
+              <View style={styles.iconContainer}>
+                <MaterialIcons name="verified-user" size={24} color="#2563EB" />
+              </View>
+              <View style={styles.menuTextContainer}>
+                <View style={styles.menuTitleRow}>
+                  <Text style={styles.menuTitle}>KYC / Verification</Text>
+                  <StatusBadge status={kycStatus} type="kyc" />
+                </View>
+                <Text style={styles.menuDescription}>Verify your identity</Text>
+              </View>
+              <Ionicons name={openSection === "kyc" ? "chevron-up" : "chevron-down"} size={20} color="#9CA3AF" />
+            </View>
+            {openSection === "kyc" && (
+              <View style={styles.expandedContent}>
+                <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate("KycScreen")} activeOpacity={0.7}>
+                  <Text style={styles.actionButtonText}>{kycStatus === "verified" ? "View/Update KYC" : "Complete Your KYC"}</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#2563EB" />
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuCard} activeOpacity={0.9} onPress={() => handleSectionPress("bank")}>
+            <View style={styles.menuCardContent}>
+              <View style={styles.iconContainer}>
+                <Ionicons name="card-outline" size={24} color="#2563EB" />
+              </View>
+              <View style={styles.menuTextContainer}>
+                <View style={styles.menuTitleRow}>
+                  <Text style={styles.menuTitle}>Bank & Payment</Text>
+                  <StatusBadge status={bankStatus} type="bank" />
+                </View>
+                <Text style={styles.menuDescription}>Manage payment methods</Text>
+              </View>
+              <Ionicons name={openSection === "bank" ? "chevron-up" : "chevron-down"} size={20} color="#9CA3AF" />
+            </View>
+            {openSection === "bank" && (
+              <View style={styles.expandedContent}>
+                {bankStatus === "verified" && (
+                  <>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Account</Text>
+                      <Text style={styles.detailValue}>{bankDetails.account}</Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>IFSC</Text>
+                      <Text style={styles.detailValue}>{bankDetails.ifsc}</Text>
+                    </View>
+                  </>
+                )}
+                <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate("BankAccountScreen")} activeOpacity={0.7}>
+                  <Text style={styles.actionButtonText}>{bankStatus === "verified" ? "View/Change Bank Account" : "Add/Verify Bank Account"}</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#2563EB" />
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuCard} activeOpacity={0.9} onPress={() => handleSectionPress("payout")}>
+            <View style={styles.menuCardContent}>
+              <View style={styles.iconContainer}>
+                <Ionicons name="cash-outline" size={24} color="#2563EB" />
+              </View>
+              <View style={styles.menuTextContainer}>
+                <Text style={styles.menuTitle}>Payout</Text>
+                <Text style={styles.menuDescription}>See payout criteria</Text>
+              </View>
+              <Ionicons name={openSection === "payout" ? "chevron-up" : "chevron-down"} size={20} color="#9CA3AF" />
+            </View>
+            {openSection === "payout" && (
+              <View style={styles.expandedContent}>
+                <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate("PayoutScreen")} activeOpacity={0.7}>
+                  <Text style={styles.actionButtonText}>Request a Payout</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#2563EB" />
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuCard} activeOpacity={0.9} onPress={() => navigation.navigate("SettingsScreen")}>
+            <View style={styles.menuCardContent}>
+              <View style={styles.iconContainer}>
+                <Ionicons name="settings-outline" size={24} color="#2563EB" />
+              </View>
+              <View style={styles.menuTextContainer}>
+                <Text style={styles.menuTitle}>Settings</Text>
+                <Text style={styles.menuDescription}>App preferences and security</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.separator} />
+
+          <TouchableOpacity style={styles.menuCard} activeOpacity={0.9} onPress={() => handleSectionPress("help")}>
+            <View style={styles.menuCardContent}>
+              <View style={styles.iconContainer}>
+                <Ionicons name="help-circle-outline" size={24} color="#2563EB" />
+              </View>
+              <View style={styles.menuTextContainer}>
+                <Text style={styles.menuTitle}>Help & Support</Text>
+                <Text style={styles.menuDescription}>Get help and support</Text>
+              </View>
+              <Ionicons name={openSection === "help" ? "chevron-up" : "chevron-down"} size={20} color="#9CA3AF" />
+            </View>
+            {openSection === "help" && (
+              <View style={styles.expandedContent}>
+                <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate("FAQScreen")} activeOpacity={0.7}>
+                  <Text style={styles.actionButtonText}>FAQ / Help Center</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#2563EB" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionButton} onPress={openSupportEmail} activeOpacity={0.7}>
+                  <Text style={styles.actionButtonText}>Contact Support (Email)</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#2563EB" />
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuCard} activeOpacity={0.9} onPress={() => handleSectionPress("legal")}>
+            <View style={styles.menuCardContent}>
+              <View style={styles.iconContainer}>
+                <Ionicons name="document-text-outline" size={24} color="#2563EB" />
+              </View>
+              <View style={styles.menuTextContainer}>
+                <Text style={styles.menuTitle}>Legal</Text>
+                <Text style={styles.menuDescription}>Terms, privacy & policies</Text>
+              </View>
+              <Ionicons name={openSection === "legal" ? "chevron-up" : "chevron-down"} size={20} color="#9CA3AF" />
+            </View>
+            {openSection === "legal" && (
+              <View style={styles.expandedContent}>
+                <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate("TermsScreen")} activeOpacity={0.7}>
+                  <Text style={styles.actionButtonText}>Terms & Conditions</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#2563EB" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate("PrivacyScreen")} activeOpacity={0.7}>
+                  <Text style={styles.actionButtonText}>Privacy Policy</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#2563EB" />
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* --- LOGOUT BUTTON WITH LOG --- */}
+          <TouchableOpacity
+            style={styles.logoutCard}
+            activeOpacity={0.9}
+            onPress={() => {
+              console.log("[ProfileScreen] Logout button truly pressed!");
+              handleLogout();
+            }}
+          >
+            <Ionicons name="log-out-outline" size={22} color="#DC2626" />
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
-
-      {/* Logout */}
-      <TouchableOpacity style={[styles.logoutButton, { backgroundColor: theme.error }]} onPress={handleLogout}>
-        <Text style={styles.logoutText}>Logout</Text>
-      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  headerCard: {
+  container: {
+    flex: 1,
+    backgroundColor: "#F0F4FF",
+  },
+  gradientHeader: {
+    paddingTop: Platform.OS === "ios" ? 60 : 40,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
+    zIndex: 2,
+  },
+  headerTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: "bold",
+    color: "#FFFFFF",
+    letterSpacing: 0.5,
+  },
+  editButton: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 22,
-    marginHorizontal: 16,
-    marginTop: 28,
-    marginBottom: 12,
-    paddingVertical: 22,
-    paddingHorizontal: 18,
-    shadowOffset: { width: 0, height: 7 },
-    shadowOpacity: 0.1,
-    shadowRadius: 18,
-    elevation: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  editButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 4,
+  },
+  avatarHeaderContainer: {
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: -32,
   },
   avatarCircle: {
     width: 62,
@@ -503,118 +488,212 @@ const styles = StyleSheet.create({
     borderRadius: 31,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 16,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.13,
+    shadowColor: "#1E3A8A",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 12,
+    borderWidth: 3,
+    borderColor: "#fff",
+    backgroundColor: "transparent",
+  },
+  avatarText: {
+    fontSize: 28,
+    fontWeight: "bold",
+    color: "#FFFFFF",
+    textShadowColor: "#17347d",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  scrollContent: {
+    paddingBottom: 30,
+  },
+  profileCard: {
+    marginHorizontal: 16,
+    marginTop: 24,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    shadowColor: "#2563EB",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  profileCardContent: {
+    padding: 20,
+    paddingTop: 36,
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  profileName: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#111827",
+    marginBottom: 4,
+    letterSpacing: 0.3,
+    textAlign: "center",
+  },
+  profileEmail: {
+    fontSize: 15,
+    color: "#6B7280",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  completionSection: {
+    marginTop: 8,
+  },
+  completionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  completionLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
+  },
+  completionPercentage: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#2563EB",
+  },
+  progressBarContainer: {
+    height: 8,
+    backgroundColor: "#E5E7EB",
+    borderRadius: 4,
+    overflow: "hidden",
+    marginBottom: 6,
+  },
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: "#2563EB",
+    borderRadius: 4,
+  },
+  completionHint: {
+    fontSize: 12,
+    color: "#9CA3AF",
+  },
+  menuSection: {
+    marginTop: 16,
+    paddingHorizontal: 16,
+  },
+  menuCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
+    marginBottom: 12,
   },
-  headerIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+  menuCardContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
   },
-  headerTextContainer: {
-    flex: 1,
+  iconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
     justifyContent: "center",
+    marginRight: 12,
   },
-  headerAppName: {
-    fontSize: 21,
+  menuTextContainer: {
+    flex: 1,
+    marginRight: 8,
+  },
+  menuTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  menuTitle: {
+    fontSize: 16,
     fontWeight: "700",
-    letterSpacing: 0.9,
-    marginBottom: 5,
+    color: "#111827",
+    letterSpacing: 0.2,
   },
-  headerEmail: {
-    fontSize: 15,
-    fontWeight: "500",
+  menuDescription: {
+    fontSize: 13,
+    color: "#6B7280",
   },
-  sectionCard: {
-    borderRadius: 16,
-    marginHorizontal: 13,
-    marginVertical: 7,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-    borderWidth: 1,
-    elevation: 0,
-  },
-  sectionHeaderRow: {
+  statusBadge: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 8,
-    marginBottom: 2,
-    paddingTop: 14,
-    paddingBottom: 12,
-    columnGap: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  sectionHeaderText: {
-    marginLeft: 10,
-    fontSize: 16,
-    fontWeight: "bold",
-    letterSpacing: 0.2,
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginLeft: 4,
   },
-  subSection: {
-    paddingBottom: 10,
-  },
-  subOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 10,
-    marginHorizontal: 3,
-    marginVertical: 5,
-    paddingVertical: 13,
-    paddingHorizontal: 18,
-    justifyContent: "space-between",
-  },
-  subOptionText: {
-    fontSize: 15,
-    fontWeight: "600",
+  expandedContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#F3F4F6",
   },
   detailRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: 9,
-    paddingHorizontal: 8,
+    paddingVertical: 12,
     borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
   },
   detailLabel: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "600",
+    color: "#374151",
   },
   detailValue: {
-    fontSize: 15,
-    fontWeight: "400",
+    fontSize: 14,
+    color: "#6B7280",
   },
-  kycStatus: {
-    fontWeight: "700",
-    marginRight: 6,
-    fontSize: 15,
-  },
-  statusVerified: {
-    fontWeight: "700",
-  },
-  statusPending: {
-    fontWeight: "700",
-  },
-  statusRejected: {
-    fontWeight: "700",
-  },
-  bankStatus: {
-    fontWeight: "700",
-    marginRight: 6,
-    fontSize: 15,
-  },
-  logoutButton: {
-    marginBottom: 32,
-    marginHorizontal: 16,
-    borderRadius: 12,
+  actionButton: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 16,
+    justifyContent: "space-between",
+    backgroundColor: "#F9FAFB",
+    padding: 14,
+    borderRadius: 10,
+    marginTop: 12,
+  },
+  actionButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#2563EB",
+  },
+  separator: {
+    height: 1,
+    backgroundColor: "#E5E7EB",
+    marginVertical: 8,
+  },
+  logoutCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
     elevation: 2,
   },
   logoutText: {
-    color: "#fff",
-    fontWeight: "600",
     fontSize: 17,
-    letterSpacing: 0.5,
+    fontWeight: "700",
+    color: "#DC2626",
+    letterSpacing: 0.3,
+    marginLeft: 8,
   },
 });

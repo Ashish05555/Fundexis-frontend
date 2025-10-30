@@ -23,7 +23,8 @@ const loadRazorpayScript = () => {
   });
 };
 
-const API_BASE = "https://fundexis-backend-758832599619.us-central1.run.app";
+// CHANGE THIS TO YOUR VPS IP AND PORT!
+const API_BASE = "http://159.65.157.202:9000";
 
 export default function RazorpayScreen() {
   const navigation = useNavigation();

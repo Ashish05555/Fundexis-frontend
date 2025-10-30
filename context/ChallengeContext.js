@@ -37,8 +37,57 @@ export function ChallengeProvider({ children }) {
       const challengesRef = collection(db, "users", userUid, "challenges");
       const snapshot = await getDocs(query(challengesRef));
       const data = snapshot.docs
-        .map(doc => ({ ...doc.data(), id: doc.id }))
+        .map(doc => {
+          const docData = doc.data();
+          
+          // Get templateId to determine correct challenge amounts
+          const templateId = docData.templateId || "1";
+          let correctBalance, correctTarget, correctLabel;
+          
+          if (templateId === "1") {
+            correctBalance = 100000;
+            correctTarget = 10000;
+            correctLabel = "1 Lakh Challenge";
+          } else if (templateId === "2") {
+            correctBalance = 500000;
+            correctTarget = 50000;
+            correctLabel = "5 Lakh Challenge";
+          } else if (templateId === "3") {
+            correctBalance = 1000000;
+            correctTarget = 100000;
+            correctLabel = "10 Lakh Challenge";
+          } else {
+            correctBalance = 100000;
+            correctTarget = 10000;
+            correctLabel = "1 Lakh Challenge";
+          }
+          
+          // Get P&L from Firestore
+          const pnl = docData.pnl || 0;
+          
+          // Calculate balance = challenge amount + pnl
+          const currentBalance = correctBalance + pnl;
+          
+          // Get challenge code
+          const code = docData.challengeCode || docData.accountNumber;
+          
+          // Build title
+          const title = code ? `${correctLabel} #${code}` : correctLabel;
+          
+          return {
+            ...docData,
+            id: doc.id,
+            title: title,
+            balance: currentBalance,
+            initialBalance: correctBalance,
+            phaseStartBalance: correctBalance,
+            profitTarget: correctTarget,
+            pnl: pnl,
+            accountNumber: code,
+          };
+        })
         .filter(acc => !acc.funded); // Only demo challenges (not funded)
+      
       setDemoAccounts(data);
 
       // Auto-select first available account if none is selected
@@ -81,7 +130,55 @@ export function ChallengeProvider({ children }) {
       const challengesRef = collection(db, "users", userUid, "challenges");
       const snapshot = await getDocs(query(challengesRef));
       const data = snapshot.docs
-        .map(doc => ({ ...doc.data(), id: doc.id }))
+        .map(doc => {
+          const docData = doc.data();
+          
+          // Get templateId to determine correct challenge amounts
+          const templateId = docData.templateId || "1";
+          let correctBalance, correctTarget, correctLabel;
+          
+          if (templateId === "1") {
+            correctBalance = 100000;
+            correctTarget = 10000;
+            correctLabel = "1 Lakh Challenge";
+          } else if (templateId === "2") {
+            correctBalance = 500000;
+            correctTarget = 50000;
+            correctLabel = "5 Lakh Challenge";
+          } else if (templateId === "3") {
+            correctBalance = 1000000;
+            correctTarget = 100000;
+            correctLabel = "10 Lakh Challenge";
+          } else {
+            correctBalance = 100000;
+            correctTarget = 10000;
+            correctLabel = "1 Lakh Challenge";
+          }
+          
+          // Get P&L from Firestore
+          const pnl = docData.pnl || 0;
+          
+          // Calculate balance = challenge amount + pnl
+          const currentBalance = correctBalance + pnl;
+          
+          // Get challenge code
+          const code = docData.challengeCode || docData.accountNumber || docData.fundedAccountNumber;
+          
+          // Build title
+          const title = code ? `${correctLabel} #${code}` : correctLabel;
+          
+          return {
+            ...docData,
+            id: doc.id,
+            title: title,
+            balance: currentBalance,
+            initialBalance: correctBalance,
+            phaseStartBalance: correctBalance,
+            profitTarget: correctTarget,
+            pnl: pnl,
+            accountNumber: code,
+          };
+        })
         .filter(acc => acc.funded); // Only funded accounts
 
       setFundedAccounts(data);

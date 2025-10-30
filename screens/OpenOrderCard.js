@@ -2,31 +2,13 @@ import React, { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import "../components/OpenOrderCard.css";
 
-/**
- * OpenOrderCard
- * - Equal spacing across 3 rows on the card
- * - Modal header shows Trigger and Limit only once
- * - Type-aware price mapping:
- *    SL-M  -> trigger = price, limit = —
- *    SL-L  -> limit = limit fields or price; trigger must be trigger_price (no guessing from price)
- *    Other -> standard mapping (limit/price as usual)
- * - Robust trigger discovery (direct keys, known nested, deep keys, strings)
- * - Toggle debug logs: window.__DEBUG_OPEN_ORDERS = false
- */
-
+/* ---------- utils ---------- */
 const EXCHANGE_COLORS = { NSE: "#e53935", BSE: "#1976d2", NFO: "#888" };
-
 if (typeof window !== "undefined" && window.__DEBUG_OPEN_ORDERS == null) {
   window.__DEBUG_OPEN_ORDERS = true;
 }
-
-/* ---------- utils ---------- */
-function upper(v, fb = "") {
-  return String(v ?? fb).toUpperCase();
-}
-function isPosNum(n) {
-  return typeof n === "number" && Number.isFinite(n) && n > 0;
-}
+function upper(v, fb = "") { return String(v ?? fb).toUpperCase(); }
+function isPosNum(n) { return typeof n === "number" && Number.isFinite(n) && n > 0; }
 function toNum(v) {
   if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
   if (typeof v === "string") {
@@ -49,67 +31,30 @@ function formatCurrency(num) {
 
 /* ---------- order type helpers ---------- */
 function getKind(order) {
-  const ot = upper(order?.order_type || "");
+  const ot = upper(order?.order_type || order?.orderType || "");
   const pt = upper(order?.price_type || "");
   const txt = `${ot} ${pt}`;
-
   const isSLM = /\bSLM\b|\bSL-M\b/.test(txt);
   const isSLL =
     /\bSL[-_ ]?L(IMIT)?\b/.test(txt) ||
-    // some payloads send just "SL" for SL-Limit
     (/\bSL\b/.test(txt) && !isSLM);
-
   const isPlainLimit = /\bLIMIT\b/.test(txt) || /\bLMT\b/.test(txt);
-
   return { isSLM, isSLL, isPlainLimit, txt };
 }
 
 /* ---------- key dictionaries ---------- */
 const TRIGGER_KEYS = [
-  "trigger_price",
-  "triggerPrice",
-  "trigger",
-  "triggerprice",
-  "stop_price",
-  "stopPrice",
-  "sl_trigger_price",
-  "slTriggerPrice",
-  "sl_trigger",
-  "slTrigger",
-  "stoploss_trigger_price",
-  "stoploss_trigger",
-  "stopLossTrigger",
-  // less common
-  "trigPrice",
-  "triggerPriceValue",
-  "sl_price",
-  "stoploss_price",
+  "trigger_price","triggerPrice","trigger","triggerprice","stop_price","stopPrice","sl_trigger_price","slTriggerPrice",
+  "sl_trigger","slTrigger","stoploss_trigger_price","stoploss_trigger","stopLossTrigger","trigPrice","triggerPriceValue",
+  "sl_price","stoploss_price"
 ];
-
 const LIMIT_KEYS = [
-  "stop_limit_price",
-  "stoploss_limit",
-  "stopLimitPrice",
-  "target_limit",
-  "target_limit_price",
-  "targetLimit",
-  "stop_limit",
-  "stopLimit",
-  "limit_price",
-  "limitPrice",
-  "order_price",
-  "lmt",
-  "lmtPrice",
-  // NOTE: deliberately NOT including "price" here anymore to avoid wrong mapping
-  "price_per_unit",
+  "stop_limit_price","stoploss_limit","stopLimitPrice","target_limit","target_limit_price","targetLimit","stop_limit",
+  "stopLimit","limit_price","limitPrice","order_price","lmt","lmtPrice","price_per_unit"
 ];
-
-/* ---------- nested/object numeric extraction ---------- */
 const INNER_NUM_KEYS = ["price", "value", "amount", "val", "p", "trigger", "trigger_price", "stop_price"];
-
 function findNumericInside(container, basePath, depth = 0, maxDepth = 2) {
   if (!container || typeof container !== "object" || depth > maxDepth) return { value: undefined, path: "" };
-
   for (const key of INNER_NUM_KEYS) {
     const n = toNum(container?.[key]);
     if (isPosNum(n)) return { value: n, path: `${basePath}.${key}` };
@@ -129,7 +74,6 @@ function findNumericInside(container, basePath, depth = 0, maxDepth = 2) {
   }
   return { value: undefined, path: "" };
 }
-
 function pickByKeysWithPath(obj, keys, basePath = "order") {
   for (const k of keys) {
     const raw = obj?.[k];
@@ -143,31 +87,17 @@ function pickByKeysWithPath(obj, keys, basePath = "order") {
   }
   return { value: undefined, path: "" };
 }
-
-/* ---------- known nested containers ---------- */
 const NESTED_CONTAINERS = ["stoploss", "stopLoss", "stop_loss", "sl", "slParams", "slDetails", "params", "details", "meta"];
 const NESTED_TRIGGER_KEYS = [
-  "trigger_price",
-  "triggerPrice",
-  "trigger",
-  "sl_trigger_price",
-  "slTriggerPrice",
-  "sl_trigger",
-  "sl_price",
-  "stop_price",
-  "stoploss_trigger",
-  "stoploss_trigger_price",
-  "stoploss_price",
+  "trigger_price","triggerPrice","trigger","sl_trigger_price","slTriggerPrice","sl_trigger","sl_price","stop_price",
+  "stoploss_trigger","stoploss_trigger_price","stoploss_price"
 ];
-
 function pickFromKnownNestedContainers(order, basePath = "order") {
   for (const cont of NESTED_CONTAINERS) {
     const box = order?.[cont];
     if (!box) continue;
-
     const byKey = pickByKeysWithPath(box, NESTED_TRIGGER_KEYS, `${basePath}.${cont}`);
     if (isPosNum(byKey.value)) return byKey;
-
     if (box && typeof box === "object") {
       for (const k of Object.keys(box)) {
         const v = box[k];
@@ -185,8 +115,6 @@ function pickFromKnownNestedContainers(order, basePath = "order") {
   }
   return { value: undefined, path: "" };
 }
-
-/* ---------- deep search ---------- */
 function deepFindNumberLikeKey(
   obj,
   { match = /(trig(ger)?(_price)?|stop(_price)?|sl(_?trigger|_?price)?|stoploss_(trigger|price))/i, ignore = /(triggered|time|count|id)/i, maxDepth = 4 } = {},
@@ -199,7 +127,6 @@ function deepFindNumberLikeKey(
       const { o, d, p } = stack.pop();
       if (!o || typeof o !== "object" || seen.has(o) || d > maxDepth) continue;
       seen.add(o);
-
       if (Array.isArray(o)) {
         for (let i = 0; i < o.length; i++) {
           const it = o[i];
@@ -210,7 +137,6 @@ function deepFindNumberLikeKey(
         }
         continue;
       }
-
       for (const k of Object.keys(o)) {
         const v = o[k];
         const np = `${p}.${k}`;
@@ -228,7 +154,6 @@ function deepFindNumberLikeKey(
   } catch {}
   return { value: undefined, path: "" };
 }
-
 function deepFindTriggerInStrings(obj, { maxDepth = 4 } = {}, basePath = "order") {
   try {
     const stack = [{ o: obj, d: 0, p: basePath }];
@@ -238,7 +163,6 @@ function deepFindTriggerInStrings(obj, { maxDepth = 4 } = {}, basePath = "order"
       const { o, d, p } = stack.pop();
       if (!o || typeof o !== "object" || seen.has(o) || d > maxDepth) continue;
       seen.add(o);
-
       if (Array.isArray(o)) {
         for (let i = 0; i < o.length; i++) {
           const it = o[i];
@@ -252,7 +176,6 @@ function deepFindTriggerInStrings(obj, { maxDepth = 4 } = {}, basePath = "order"
         }
         continue;
       }
-
       for (const k of Object.keys(o)) {
         const v = o[k];
         const np = `${p}.${k}`;
@@ -267,28 +190,19 @@ function deepFindTriggerInStrings(obj, { maxDepth = 4 } = {}, basePath = "order"
   } catch {}
   return { value: undefined, path: "" };
 }
-
-/* ---------- pickers ---------- */
 function pickLimit(order) {
   const kind = getKind(order);
   const byKeys = pickByKeysWithPath(order, LIMIT_KEYS).value;
-
-  // SL-M: no limit — show explicit limit only if present (rare), do not fall back to price
   if (kind.isSLM) return isPosNum(byKeys) ? byKeys : undefined;
-
-  // SL-L: prefer explicit limit keys; if missing, some payloads put limit in "price"
   if (kind.isSLL) {
     if (isPosNum(byKeys)) return byKeys;
     const p = toNum(order.price);
     return isPosNum(p) ? p : undefined;
   }
-
-  // Plain LIMIT or others: prefer explicit limit keys, else fall back to "price"
   if (isPosNum(byKeys)) return byKeys;
   const fallback = toNum(order.price);
   return isPosNum(fallback) ? fallback : undefined;
 }
-
 function pickAvg(order) {
   const byKeys = pickByKeysWithPath(order, ["limit_price", "limitPrice"]).value;
   if (isPosNum(byKeys)) return byKeys;
@@ -296,24 +210,16 @@ function pickAvg(order) {
   if (isPosNum(p)) return p;
   return undefined;
 }
-
 function pickTriggerDetailed(order) {
   const kind = getKind(order);
-
-  // Direct and nested discovery first
   const direct = pickByKeysWithPath(order, TRIGGER_KEYS);
   if (isPosNum(direct.value)) return { ...direct, how: "direct" };
-
   const fromBox = pickFromKnownNestedContainers(order);
   if (isPosNum(fromBox.value)) return { ...fromBox, how: "nested-container" };
-
   const deepKey = deepFindNumberLikeKey(order);
   if (isPosNum(deepKey.value)) return { ...deepKey, how: "deep-key" };
-
   const deepText = deepFindTriggerInStrings(order);
   if (isPosNum(deepText.value)) return { ...deepText, how: "deep-text" };
-
-  // Type-aware inference
   const priceVal = toNum(order.price);
   const limitVal =
     toNum(order.stoploss_limit) ??
@@ -322,17 +228,9 @@ function pickTriggerDetailed(order) {
     toNum(order.limitPrice) ??
     undefined;
   const side = upper(order?.transaction_type || order?.side || "BUY");
-
-  // SL-M: trigger = price (no limit)
   if (kind.isSLM && isPosNum(priceVal)) {
     return { value: priceVal, path: "inferred(price; SLM)", how: "inferred-SLM" };
   }
-
-  // SL-L: do NOT infer trigger from price; only show if we truly found it above
-  // If you must force a fallback, uncomment the line below (not recommended because it was wrong earlier)
-  // if (kind.isSLL && isPosNum(priceVal) && isPosNum(limitVal)) return { value: side === "SELL" ? Math.min(priceVal, limitVal) : Math.max(priceVal, limitVal), path: "inferred(price,limit; SLL)", how: "inferred-SLL" };
-
-  // For non-SL orders, no inference
   return { value: undefined, path: "", how: "" };
 }
 
@@ -356,6 +254,7 @@ export default function OpenOrderCard({ order, onModify, onCancel, onCancelConfi
     );
   }
 
+  // FIX: Prefer orderType (camelCase) for display; fallback to order_type for compatibility
   const {
     transaction_type = "BUY",
     quantity = 0,
@@ -364,16 +263,18 @@ export default function OpenOrderCard({ order, onModify, onCancel, onCancelConfi
     status = "OPEN",
     exchange = "NFO",
     product_type = "MIS",
-    order_type = "MARKET",
+    orderType = "MARKET", // <-- prefer camelCase (from Firestore and OrdersTab.js)
+    order_type = "MARKET", // for backward compatibility
     isAMO = false,
     order_variety = "REGULAR",
     id,
     order_id,
   } = order;
 
+  // Display order type properly
+  const displayOrderType = orderType || order_type || "MARKET";
   const exchangeColor = EXCHANGE_COLORS[upper(exchange)] || "#888";
   const displayStatus = isAMO || order_variety === "AMO" ? "SCHEDULED" : upper(status || "OPEN");
-
   const rowGap = 12;
 
   function renderCardAvgRow() {
@@ -590,7 +491,8 @@ export default function OpenOrderCard({ order, onModify, onCancel, onCancelConfi
           </span>
           <div className="product-order-right">
             <span className={`product-type ${String(product_type).toLowerCase()}`}>{upper(product_type)}</span>
-            <span className={`order-type ${String(order_type).toLowerCase()}`}>{upper(order_type)}</span>
+            {/* FIXED: Use displayOrderType so LIMIT/MARKET is correct */}
+            <span className={`order-type ${String(displayOrderType).toLowerCase()}`}>{upper(displayOrderType)}</span>
           </div>
         </div>
       </div>

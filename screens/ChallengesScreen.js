@@ -1,12 +1,17 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from "react-native";
-import { LinearGradient as ExpoLinearGradient } from "expo-linear-gradient";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Dimensions } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import { useNavigation } from "@react-navigation/native";
+import { auth } from "../firebase";
 
-const BRAND_GRADIENT = ["#2540F6", "#120FD8"];
-const ICON_GRADIENT = ["#2540F6", "#6B8CFF"];
+const ENABLE_MOCK_PAYMENTS = true;
+const MOCK_PAYMENT_URL = "https://asia-south1-fundexis-app-75223.cloudfunctions.net/mockPaymentCreate";
+const getUid = () => auth.currentUser?.uid || null;
+
+// Responsive curve height
+const SCREEN_WIDTH = Dimensions.get("window").width;
+const HEADER_HEIGHT = 110;
 
 const challenges = [
   {
@@ -45,54 +50,104 @@ export default function ChallengesScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation();
   const [loadingId, setLoadingId] = useState(null);
+  const [mockLoadingId, setMockLoadingId] = useState(null);
 
   const handleBuy = (challenge) => {
     setLoadingId(challenge.id);
-    // Navigate to Payment Options screen, passing the selected challenge
     navigation.navigate("PaymentOptionsScreen", { challenge });
     setLoadingId(null);
   };
 
+  const handleMockBuy = async (challenge) => {
+    setMockLoadingId(challenge.id);
+    try {
+      const uid = getUid();
+      if (!uid) throw new Error("User not authenticated. Please login again.");
+      const response = await fetch(MOCK_PAYMENT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid,
+          challengeTemplateId: challenge.id,
+          amount: challenge.fee,
+        }),
+      });
+
+      if (!response.ok) {
+        let errMsg = "Mock payment failed";
+        try {
+          const errJson = await response.json();
+          if (errJson && errJson.error) errMsg += `: ${errJson.error}`;
+        } catch (e) {}
+        throw new Error(errMsg);
+      }
+
+      const result = await response.json();
+      const { paymentMockId, challengeCode } = result;
+      let canNavigate = false;
+      const navState = navigation.getState?.();
+      if (navState && navState.routeNames) {
+        canNavigate = navState.routeNames.includes("DemoTradingScreen");
+      }
+      if (!canNavigate) {
+        Alert.alert(
+          "Navigation Error",
+          "DemoTradingScreen is not registered in your navigator. Please add it to your navigation stack in App.js."
+        );
+        setMockLoadingId(null);
+        return;
+      }
+      navigation.navigate("DemoTradingScreen", {
+        challengeCode,
+        challengeName: challenge.title,
+        challengeFunding: challenge.funding,
+        challengeType: challenge.type,
+        challengeTarget: challenge.profitTarget,
+        challengeMaxLoss: challenge.maxLoss,
+        billingKey: challenge.billingKey,
+        paymentMockId,
+      });
+    } catch (err) {
+      Alert.alert("Mock payment failed", err.message);
+    }
+    setMockLoadingId(null);
+  };
+
   const renderChallenge = ({ item }) => (
-    <ExpoLinearGradient
-      colors={BRAND_GRADIENT}
-      style={styles.cardWrapper}
-      start={[0, 0]}
-      end={[1, 1]}
-    >
-      <View style={[styles.cardContent, { backgroundColor: theme.card }]}>
-        <ExpoLinearGradient colors={ICON_GRADIENT} style={styles.iconCircle}>
-          <MaterialCommunityIcons name="trophy-award" size={32} color={theme.white} />
-        </ExpoLinearGradient>
-        <View style={styles.cardInfo}>
-          <Text style={[styles.challengeName, { color: theme.brand }]}>{item.title}</Text>
-          <View style={styles.infoRow}>
-            <Text style={[styles.label, { color: theme.text }]}>Funding</Text>
-            <Text style={[styles.value, { color: theme.brand }]}>₹{item.funding.toLocaleString()}</Text>
+    <View style={styles.challengeCard}>
+      <View style={styles.cardHeaderRow}>
+        <View style={styles.iconCircle}>
+          <MaterialCommunityIcons name="trophy-award" size={30} color={theme.brand} />
+        </View>
+        <Text style={[styles.challengeTitle, { color: theme.brand }]}>{item.title}</Text>
+      </View>
+      <View style={styles.challengeMetaRow}>
+        <View style={styles.challengeMetaBlock}>
+          <Text style={styles.challengeMetaLabel}>Funding</Text>
+          <Text style={styles.challengeMetaValue}>{`₹${item.funding.toLocaleString()}`}</Text>
+        </View>
+        <View style={styles.challengeMetaBlockRight}>
+          <Text style={styles.challengeMetaLabel}>Fee</Text>
+          <Text style={styles.challengeMetaValue}>{`₹${item.fee.toLocaleString()}`}</Text>
+        </View>
+      </View>
+      <View style={styles.challengeStatsRow}>
+        <View style={styles.statsWrapper}>
+          <View style={[styles.statPill, { backgroundColor: "#E8FFF2" }]}>
+            <Text style={[styles.statsNumber, { color: "#388e3c" }]}>{item.profitTarget}</Text>
+            <Text style={[styles.statsLabel, { color: "#388e3c" }]}>Profit Target</Text>
           </View>
-          <View style={styles.infoRow}>
-            <Text style={[styles.label, { color: theme.text }]}>Fee</Text>
-            <Text style={[styles.value, { color: theme.brand }]}>₹{item.fee.toLocaleString()}</Text>
-          </View>
-          <View style={styles.statsRow}>
-            <View style={[styles.statPill, { backgroundColor: theme.background }]}>
-              <Text style={[styles.statsNumber, { color: theme.brand }]}>{item.profitTarget}</Text>
-              <Text style={[styles.statsLabel, { color: theme.sectionTitle }]}>Profit Target</Text>
-            </View>
-            <View style={[styles.statPill, { backgroundColor: theme.background }]}>
-              <Text style={[styles.statsNumber, { color: theme.brand }]}>{item.maxLoss}</Text>
-              <Text style={[styles.statsLabel, { color: theme.sectionTitle }]}>Max Loss</Text>
-            </View>
+          <View style={[styles.statPill, { backgroundColor: "#FFE9EA" }]}>
+            <Text style={[styles.statsNumber, { color: "#e53935" }]}>{item.maxLoss}</Text>
+            <Text style={[styles.statsLabel, { color: "#e53935" }]}>Max Loss</Text>
           </View>
         </View>
       </View>
       <TouchableOpacity
-        style={[
-          styles.button,
-          { backgroundColor: theme.brand, opacity: loadingId === item.id ? 0.7 : 1 },
-        ]}
+        style={[styles.button, { backgroundColor: theme.brand, marginTop: 16, marginBottom: ENABLE_MOCK_PAYMENTS ? 8 : 0 }]}
         onPress={() => handleBuy(item)}
         disabled={loadingId === item.id}
+        activeOpacity={0.85}
       >
         {loadingId === item.id ? (
           <ActivityIndicator color={theme.white} />
@@ -100,13 +155,29 @@ export default function ChallengesScreen() {
           <Text style={[styles.buttonText, { color: theme.white }]}>Buy Challenge</Text>
         )}
       </TouchableOpacity>
-    </ExpoLinearGradient>
+      {ENABLE_MOCK_PAYMENTS && (
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: "#6B8CFF", opacity: mockLoadingId === item.id ? 0.7 : 1 }]}
+          onPress={() => handleMockBuy(item)}
+          disabled={mockLoadingId === item.id}
+          activeOpacity={0.85}
+        >
+          {mockLoadingId === item.id ? (
+            <ActivityIndicator color={theme.white} />
+          ) : (
+            <Text style={[styles.buttonText, { color: theme.white }]}>Buy (Mock Payment)</Text>
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
   );
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <View style={[styles.headerCard, { backgroundColor: theme.card }]}>
-        <Text style={[styles.header, { color: theme.brand }]}>Available Challenges</Text>
+      <View style={styles.headerCurve}>
+        <View style={styles.headerCurveBg} />
+        <Text style={styles.headerTitle}>Available Challenges</Text>
+        <Text style={styles.headerSubtitle}>Choose a challenge that fits your goals</Text>
       </View>
       <FlatList
         data={challenges}
@@ -125,115 +196,157 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     paddingTop: 0,
   },
-  headerCard: {
+  headerCurve: {
     width: "100%",
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
-    elevation: 6,
-    shadowColor: "#120FD822",
-    shadowOpacity: 0.07,
-    shadowOffset: { width: 0, height: 7 },
-    shadowRadius: 18,
-    marginBottom: 16,
-    paddingTop: 40,
-    paddingBottom: 30,
+    height: HEADER_HEIGHT + 40,
     alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+    position: "relative",
+    overflow: "hidden",
   },
-  header: {
-    fontSize: 26,
+  headerCurveBg: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: HEADER_HEIGHT + 40,
+    backgroundColor: "#2540F6",
+    borderBottomLeftRadius: 42,
+    borderBottomRightRadius: 42,
+    zIndex: 1,
+  },
+  headerTitle: {
+    color: "#fff",
+    fontSize: 24,
     fontWeight: "bold",
-    letterSpacing: 0.4,
+    marginTop: 40,
+    letterSpacing: 0.2,
+    zIndex: 2,
+    textAlign: "center",
   },
-  cardWrapper: {
-    borderRadius: 22,
+  headerSubtitle: {
+    color: "#fff",
+    fontSize: 16,
+    opacity: 0.89,
+    marginTop: 7,
+    marginBottom: 6,
+    fontWeight: "500",
+    zIndex: 2,
+    textAlign: "center",
+    letterSpacing: 0.01,
+  },
+  challengeCard: {
+    backgroundColor: "#fff",
+    borderRadius: 24,
     marginHorizontal: 18,
     marginBottom: 22,
-    padding: 2,
-    elevation: 8,
+    padding: 18,
+    elevation: 6,
     shadowColor: "#120FD822",
-    shadowOpacity: 0.17,
-    shadowOffset: { width: 0, height: 7 },
-    shadowRadius: 18,
+    shadowOpacity: 0.09,
+    shadowOffset: { width: 0, height: 5 },
+    shadowRadius: 14,
+    borderWidth: 2.5,
+    borderColor: "#1740FF", // more visible border
   },
-  cardContent: {
+  cardHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 20,
-    paddingVertical: 20,
-    paddingHorizontal: 20,
+    marginBottom: 8,
   },
   iconCircle: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#EEF2FF",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 18,
+    marginRight: 13,
     elevation: 2,
     shadowColor: "#2540F6",
-    shadowOpacity: 0.13,
-    shadowOffset: { width: 0, height: 3 },
-    shadowRadius: 8,
+    shadowOpacity: 0.12,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 6,
   },
-  cardInfo: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  challengeName: {
+  challengeTitle: {
     fontSize: 22,
     fontWeight: "bold",
-    marginBottom: 8,
-    textAlign: "left",
-    letterSpacing: 0.5,
+    flex: 1,
+    letterSpacing: 0.4,
+    marginTop: 2,
   },
-  infoRow: {
+  challengeMetaRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 3,
-    marginTop: 1,
+    marginBottom: 10,
+    marginTop: 4,
   },
-  label: {
+  challengeMetaBlock: {
+    flex: 1,
+    alignItems: "flex-start",
+  },
+  challengeMetaBlockRight: {
+    flex: 1,
+    alignItems: "flex-end",
+  },
+  challengeMetaLabel: {
     fontSize: 16,
     fontWeight: "500",
+    color: "#888",
     opacity: 0.93,
+    marginBottom: 3,
   },
-  value: {
-    fontSize: 16,
+  challengeMetaValue: {
+    fontSize: 17,
     fontWeight: "700",
-    opacity: 0.95,
+    color: "#111", // black color for funding and fee
+    opacity: 1,
   },
-  statsRow: {
+  challengeStatsRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
-    gap: 12,
+    marginTop: 7,
+    marginBottom: 2,
+    width: "100%",
+    justifyContent: "center",
+  },
+  statsWrapper: {
+    flexDirection: "row",
+    width: "100%",
+    justifyContent: "space-between",
+    gap: 18,
   },
   statPill: {
     borderRadius: 13,
-    paddingVertical: 7,
-    paddingHorizontal: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
     alignItems: "center",
-    minWidth: 70,
-    marginRight: 6,
+    minWidth: 110,
+    justifyContent: "center",
+    flex: 1,
   },
   statsNumber: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "bold",
     textAlign: "center",
     marginBottom: 1,
+    letterSpacing: 0.2,
   },
   statsLabel: {
-    fontSize: 11,
+    fontSize: 12,
     textAlign: "center",
     fontWeight: "600",
     marginTop: 1,
+    letterSpacing: 0.1,
   },
   button: {
     paddingVertical: 15,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+    borderRadius: 16,
     alignItems: "center",
     marginTop: 0,
+    marginBottom: 0,
+    width: "100%",
   },
   buttonText: {
     fontWeight: "700",

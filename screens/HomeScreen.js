@@ -1,35 +1,36 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, useWindowDimensions } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient as ExpoLinearGradient } from 'expo-linear-gradient';
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import useRestLivePrices from "../hooks/useRestLivePrices";
 
-const BRAND_GRADIENT = ["#2540F6", "#120FD8"];
-const ICON_GRADIENT = ["#2540F6", "#6B8CFF"];
+const BRAND_BLUE = "#1740FF";
+const BRAND_GRADIENT = ["#1740FF", "#0F2FCC"];
+const LIGHT_BLUE = "#F7F9FF";
+const WHITE = "#FFFFFF";
+const GREEN = "#16A34A";
+const RED = "#EF4444";
+const OFF_WHITE = "#F9FAFB";
+const DARK_BORDER = "#0F2FCC";
 
-// Gaps
-const GAP_BETWEEN_DEFAULT = 12;     // desired tidy gap between cards
-const GAP_BELOW_HEADER_DEFAULT = 10; // desired small gap under header
-const MIN_GAP_BETWEEN = 6;           // minimum allowed gap on tiny screens
-const MIN_GAP_BELOW_HEADER = 6;
-
-// Absolute minimum card height to keep content comfortable (fonts unchanged)
-const ABS_MIN_CARD_H = 86;
+// Update these to your actual tokens for NIFTY 50 and BANKNIFTY
+const NIFTY_TOKEN = "256265";
+const BANKNIFTY_TOKEN = "260105";
 
 export default function HomeScreen({ navigation }) {
-  const [userProfile, setUserProfile] = useState({ name: "Trader" }); // show UI immediately
+  const [userProfile, setUserProfile] = useState({ name: "Trader" });
   const [currentUid, setCurrentUid] = useState(null);
+  const [challenges, setChallenges] = useState([]);
+  const [loadingChallenges, setLoadingChallenges] = useState(true);
 
-  // Measurements
-  const [headerH, setHeaderH] = useState(0);
+  // Live prices hook, polling every 1 second
+  const prices = useRestLivePrices([NIFTY_TOKEN, BANKNIFTY_TOKEN], 1000);
+
   const insets = useSafeAreaInsets();
-  const tabBarHeightRaw = useBottomTabBarHeight?.() ?? 0;
-  const tabBarHeight = tabBarHeightRaw > 0 ? tabBarHeightRaw : 60; // safe fallback on web preview
-  const { height: winH } = useWindowDimensions();
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -40,324 +41,533 @@ export default function HomeScreen({ navigation }) {
           const data = snap.exists() ? snap.data() : {};
           const userName = data?.name || user.displayName || "Trader";
           setUserProfile({ name: userName });
+          await fetchChallenges(user.uid);
         } else {
           setCurrentUid(null);
           setUserProfile({ name: "Trader" });
+          setChallenges([]);
+          setLoadingChallenges(false);
         }
       } catch {
         setCurrentUid(null);
         setUserProfile({ name: "Trader" });
+        setChallenges([]);
+        setLoadingChallenges(false);
       }
     });
     return () => unsub();
   }, []);
 
-  // Compute exact heights so the three cards + gaps fill the screen with no leftover space
-  const layout = useMemo(() => {
-    // Start with desired gaps
-    let gapBetween = GAP_BETWEEN_DEFAULT;
-    let gapBelowHeader = GAP_BELOW_HEADER_DEFAULT;
+  const fetchChallenges = async (userId) => {
+    if (!userId) {
+      setChallenges([]);
+      setLoadingChallenges(false);
+      return;
+    }
+    setLoadingChallenges(true);
+    try {
+      const snap = await getDocs(collection(db, `users/${userId}/challenges`));
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setChallenges(rows);
+    } catch (e) {
+      console.log("HomeScreen fetchChallenges error:", e?.message || e);
+      setChallenges([]);
+    } finally {
+      setLoadingChallenges(false);
+    }
+  };
 
-    // We reserve exactly the tab bar area at the bottom (no extra padding so we fill fully)
-    const bottomReserve = tabBarHeight + insets.bottom;
-
-    // Fixed vertical parts (top safe area + header + gaps + bottom reserve)
-    const fixedTop = insets.top + headerH;
-    const fixedGaps = gapBelowHeader + (2 * gapBetween);
-
-    // Space available for the three cards only
-    let available = winH - fixedTop - fixedGaps - bottomReserve;
-
-    // If there isn't enough room for comfortable cards, compress the gaps first
-    if (available < ABS_MIN_CARD_H * 3) {
-      const gapOver =
-        (gapBelowHeader - MIN_GAP_BELOW_HEADER) + 2 * (gapBetween - MIN_GAP_BETWEEN);
-      const shortage = (ABS_MIN_CARD_H * 3) - available;
-      const recover = Math.min(Math.max(0, gapOver), Math.max(0, shortage));
-
-      // Shrink between-gaps first (split across two gaps)
-      const canShrinkBetweenTotal = Math.max(0, (gapBetween - MIN_GAP_BETWEEN) * 2);
-      const shrinkBetween = Math.min(recover, canShrinkBetweenTotal);
-      const perGapReduce = shrinkBetween / 2;
-      gapBetween -= perGapReduce;
-
-      // Then shrink the gap below header if needed
-      const remaining = recover - shrinkBetween;
-      if (remaining > 0) {
-        const canShrinkBelow = Math.max(0, gapBelowHeader - MIN_GAP_BELOW_HEADER);
-        const shrinkBelow = Math.min(remaining, canShrinkBelow);
-        gapBelowHeader -= shrinkBelow;
+  // Calculate challenge counts based on actual data
+  const { activeCount, passedCount, failedCount } = React.useMemo(() => {
+    let active = 0, passed = 0, failed = 0;
+    for (const challenge of challenges) {
+      const phase = normalizePhase(challenge?.phase);
+      const status = getDisplayStatusForPhase(phase, challenge);
+      if (phase !== "funded") {
+        if (status === "ACTIVE") active++;
+        else if (status === "PASSED") passed++;
+        else if (status === "FAILED" || status === "BREACHED") failed++;
       }
-
-      // Recompute available after compression
-      const fixedGapsNew = gapBelowHeader + (2 * gapBetween);
-      available = winH - fixedTop - fixedGapsNew - bottomReserve;
     }
-
-    // Split available height across 3 cards exactly (no leftover whitespace)
-    // Distribute remainder pixels to the first cards to sum precisely.
-    const base = Math.floor(available / 3);
-    let remainder = Math.max(0, Math.round(available - base * 3));
-    let h1 = base + (remainder > 0 ? 1 : 0); remainder = Math.max(0, remainder - 1);
-    let h2 = base + (remainder > 0 ? 1 : 0); remainder = Math.max(0, remainder - 1);
-    let h3 = base; // last gets whatever remains
-
-    // Ensure absolute minima (if base < ABS_MIN_CARD_H for very small screens, allow smaller but keep fonts)
-    if (base >= ABS_MIN_CARD_H) {
-      h1 = Math.max(ABS_MIN_CARD_H, h1);
-      h2 = Math.max(ABS_MIN_CARD_H, h2);
-      h3 = Math.max(ABS_MIN_CARD_H, h3);
-    }
-
-    return {
-      h1: Math.round(h1),
-      h2: Math.round(h2),
-      h3: Math.round(h3),
-      gapBetween: Math.round(gapBetween),
-      gapBelowHeader: Math.round(gapBelowHeader),
-      bottomReserve: Math.round(bottomReserve),
-    };
-  }, [winH, insets.top, insets.bottom, headerH, tabBarHeight]);
+    return { activeCount: active, passedCount: passed, failedCount: failed };
+  }, [challenges]);
 
   const name = userProfile?.name || "Trader";
 
+  // Get market details from live prices
+  const nifty = prices[NIFTY_TOKEN] || {};
+  const banknifty = prices[BANKNIFTY_TOKEN] || {};
+
+  // Helper for up/down color/arrow and percent change
+  function getMarketStats(item) {
+    // Use last_price and close/ohlc.close as per backend
+    const price =
+      typeof item.last_price === "number" ? item.last_price :
+      typeof item.price === "number" ? item.price : null;
+
+    // Accept either close or ohlc.close for prevClose
+    const prevClose =
+      typeof item.close === "number" ? item.close :
+      item && item.ohlc && typeof item.ohlc.close === "number" ? item.ohlc.close :
+      null;
+
+    if (price === null) {
+      // fallback for missing data
+      return {
+        price: null,
+        percent: "--",
+        arrow: "↓",
+        color: RED,
+        borderStyle: styles.marketCardRed,
+        change: "--",
+        isUp: false
+      };
+    }
+    let change = "--";
+    let percent = "--";
+    let isUp = false;
+    if (prevClose !== null && prevClose !== 0) {
+      change = (price - prevClose).toFixed(2);
+      percent = (((price - prevClose) / prevClose) * 100).toFixed(2);
+      isUp = price > prevClose;
+    }
+    return {
+      price: price,
+      percent: percent,
+      arrow: isUp ? "↑" : "↓",
+      color: isUp ? GREEN : RED,
+      borderStyle: isUp ? styles.marketCardGreen : styles.marketCardRed,
+      change: change,
+      isUp
+    };
+  }
+
+  const niftyStats = getMarketStats(nifty);
+  const bankniftyStats = getMarketStats(banknifty);
+
+  // ---- MarketTab component, arrow next to label, percentage on third row left side ----
+  function MarketTab({ label, stats }) {
+    return (
+      <View style={[styles.marketCard, stats.borderStyle]}>
+        {/* Top Row: Arrow and label */}
+        <View style={styles.marketTop}>
+          <View style={[
+            styles.marketIconWrapper,
+            { backgroundColor: `${stats.color}15` }
+          ]}>
+            <Ionicons
+              name={stats.arrow === "↑" ? "trending-up" : "trending-down"}
+              size={22}
+              color={stats.color}
+              style={{ marginRight: 5, marginBottom: -2 }}
+            />
+          </View>
+          <Text style={styles.marketName}>{label}</Text>
+        </View>
+        {/* Second Row: Price */}
+        <Text style={styles.marketPrice}>
+          {typeof stats.price === "number"
+            ? stats.price.toLocaleString("en-IN", { maximumFractionDigits: 2 })
+            : "..."}
+        </Text>
+        {/* Third Row: left side arrow and percent */}
+        <View style={styles.marketChangeRow}>
+          <Ionicons
+            name={stats.arrow === "↑" ? "arrow-up-sharp" : "arrow-down-sharp"}
+            size={18}
+            color={stats.color}
+            style={{ marginRight: 2 }}
+          />
+          <Text style={[styles.marketChangeText, { color: stats.color }]}>
+            {stats.percent !== "--"
+              ? `${stats.isUp ? "+" : ""}${stats.percent}%`
+              : "--"}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
-    <View style={[styles.bg, { paddingTop: insets.top }]}>
-      {/* Header (measured) */}
+    <View style={[
+      styles.container,
+      { paddingTop: insets.top }
+    ]}>
       <ExpoLinearGradient
         colors={BRAND_GRADIENT}
+        style={styles.headerBg}
         start={[0, 0]}
         end={[0, 1]}
-        style={styles.headerCurve}
-        onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
       >
-        <Text style={styles.greetingText}>Welcome,</Text>
-        <Text style={styles.userName} numberOfLines={1} allowFontScaling={false}>
-          {name}!
-        </Text>
+        <View style={styles.header}>
+          <Text style={styles.welcomeText}>Welcome,</Text>
+          <Text style={styles.userName}>{name}</Text>
+        </View>
       </ExpoLinearGradient>
 
-      {/* Gap under header (compressible on tiny screens) */}
-      <View style={{ height: layout.gapBelowHeader }} />
-
-      {/* Cards – keep 90% width, centered */}
-      <View style={styles.cardsContainer}>
-        {/* Start Trading */}
-        <TouchableOpacity
-          style={styles.cardWrapper}
-          activeOpacity={0.96}
-          onPress={() => navigation.navigate('Trade', { screen: 'DemoTrading', userId: currentUid })}
-        >
-          <ExpoLinearGradient colors={BRAND_GRADIENT} style={[styles.cardGradient, { minHeight: layout.h1 }]}>
-            <View style={styles.cardRow}>
-              <ExpoLinearGradient colors={ICON_GRADIENT} style={styles.iconCircle}>
-                <Ionicons name="trending-up" size={28} color={"#fff"} />
-              </ExpoLinearGradient>
-              <View style={styles.cardInfo}>
-                <Text style={styles.cardTitle} numberOfLines={1} allowFontScaling={false}>
-                  Start Trading
-                </Text>
-                <Text
-                  style={styles.cardSubtitle}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.6}
-                  allowFontScaling={false}
-                >
-                  Your trading journey starts here
-                </Text>
+      {/* Main content */}
+      <View style={styles.flexGrow}>
+        {/* Quick Actions */}
+        <View style={styles.quickActionsContainer}>
+          <TouchableOpacity
+            style={styles.cardWrapper}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Trade', { screen: 'DemoTrading', userId: currentUid })}
+          >
+            <ExpoLinearGradient 
+              colors={BRAND_GRADIENT} 
+              start={[0, 0]} 
+              end={[1, 1]}
+              style={styles.actionCard}
+            >
+              <View style={styles.iconCircle}>
+                <Ionicons name="trending-up" size={34} color={WHITE} />
               </View>
+              <View style={styles.cardContent}>
+                <Text style={styles.cardTitle}>Start Trading</Text>
+                <Text style={styles.cardSubtitle}>Begin your trading journey</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={34} color={WHITE} />
+            </ExpoLinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.cardWrapper}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Challenges', { userId: currentUid })}
+          >
+            <ExpoLinearGradient 
+              colors={BRAND_GRADIENT} 
+              start={[0, 0]} 
+              end={[1, 1]}
+              style={styles.actionCard}
+            >
+              <View style={styles.iconCircle}>
+                <FontAwesome5 name="shopping-cart" size={32} color={WHITE} />
+              </View>
+              <View style={styles.cardContent}>
+                <Text style={styles.cardTitle}>Buy a Challenge</Text>
+                <Text style={styles.cardSubtitle}>Get funded today</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={34} color={WHITE} />
+            </ExpoLinearGradient>
+          </TouchableOpacity>
+        </View>
+
+        {/* Active Challenges Section */}
+        <TouchableOpacity
+          style={styles.challengesSection}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('MyChallenges', { userId: currentUid })}
+        >
+          <View style={styles.challengesHeader}>
+            <MaterialCommunityIcons name="chart-box" size={24} color={BRAND_BLUE} style={styles.challengesIcon} />
+            <Text style={styles.challengesTitle}>Active Challenges</Text>
+            <Ionicons name="chevron-forward" size={22} color="#6B7280" />
+          </View>
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>ACTIVE</Text>
+              <Text style={[styles.statValue, { color: BRAND_BLUE }]} aria-label="Active challenges count">
+                {loadingChallenges ? "..." : activeCount}
+              </Text>
             </View>
-          </ExpoLinearGradient>
+            <View style={styles.statCard}>
+              <Text style={[styles.statLabel]}>PASSED</Text>
+              <Text style={[styles.statValue, { color: GREEN }]} aria-label="Passed challenges count">
+                {loadingChallenges ? "..." : passedCount}
+              </Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>FAILED</Text>
+              <Text style={[styles.statValue, { color: RED }]} aria-label="Failed challenges count">
+                {loadingChallenges ? "..." : failedCount}
+              </Text>
+            </View>
+          </View>
         </TouchableOpacity>
 
-        {/* Gap between cards */}
-        <View style={{ height: layout.gapBetween }} />
-
-        {/* Buy a Challenge */}
-        <TouchableOpacity
-          style={styles.cardWrapper}
-          activeOpacity={0.96}
-          onPress={() => navigation.navigate('Challenges', { userId: currentUid })}
-        >
-          <ExpoLinearGradient colors={["#2C36AD", "#120FD8"]} style={[styles.cardGradient, { minHeight: layout.h2 }]}>
-            <View style={styles.cardRow}>
-              <ExpoLinearGradient colors={ICON_GRADIENT} style={styles.iconCircle}>
-                <FontAwesome5 name="shopping-cart" size={24} color={"#fff"} />
-              </ExpoLinearGradient>
-              <View style={styles.cardInfo}>
-                <Text style={styles.cardTitle} numberOfLines={1} allowFontScaling={false}>
-                  Buy a Challenge
-                </Text>
-                <Text
-                  style={styles.cardSubtitle}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.6}
-                  allowFontScaling={false}
-                >
-                  Take on a challenge and get funded
-                </Text>
-              </View>
-            </View>
-          </ExpoLinearGradient>
-        </TouchableOpacity>
-
-        {/* Gap between cards */}
-        <View style={{ height: layout.gapBetween }} />
-
-        {/* My Challenges */}
-        <TouchableOpacity
-          style={styles.cardWrapper}
-          activeOpacity={0.96}
-          onPress={() => {
-            console.log("My Challenges pressed");
-            navigation.navigate('MyChallenges', { userId: currentUid });
-          }}
-        >
-          <ExpoLinearGradient colors={["#3F51B5", "#120FD8"]} style={[styles.cardGradient, { minHeight: layout.h3 }]}>
-            <View style={styles.cardRow}>
-              <ExpoLinearGradient colors={ICON_GRADIENT} style={styles.iconCircle}>
-                <MaterialCommunityIcons name="view-list" size={24} color={"#fff"} />
-              </ExpoLinearGradient>
-              <View style={styles.cardInfo}>
-                <Text style={styles.cardTitle} numberOfLines={1} allowFontScaling={false}>
-                  My Challenges
-                </Text>
-                <Text
-                  style={styles.cardSubtitle}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.6}
-                  allowFontScaling={false}
-                >
-                  View your trading challenges
-                </Text>
-              </View>
-            </View>
-          </ExpoLinearGradient>
-        </TouchableOpacity>
+        {/* Market Overview */}
+        <View style={styles.marketSection}>
+          <Text style={styles.sectionTitle}>Market Overview</Text>
+          <View style={styles.marketRow}>
+            <MarketTab label="NIFTY 50" stats={niftyStats} />
+            <MarketTab label="BANK NIFTY" stats={bankniftyStats} />
+          </View>
+        </View>
       </View>
-
-      {/* Exact reserve for the tab bar so the three cards end flush at the top of it */}
-      <View style={{ height: layout.bottomReserve }} />
     </View>
   );
 }
 
+/* -------------------------------- Helper Functions -------------------------------- */
+
+function normalizePhase(raw) {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (s === "2" || s === "phase 2" || s.includes("phase 2") || raw === 2) return "2";
+  if (s === "funded") return "funded";
+  return "1";
+}
+
+function getDisplayStatusForPhase(phase, ch) {
+  const tokens = [
+    ch?.status,
+    ch?.phaseStatus,
+    ch?.challengeStatus,
+    ch?.state,
+    ch?.result,
+    ch?.verdict,
+    ch?.reason,
+    ch?.violation,
+  ].filter(Boolean).map(v => String(v).toLowerCase());
+
+  const text = tokens.join(" | ");
+  const has = (arr) => arr.some(m => text.includes(m));
+
+  const passed = ["passed","pass","completed","complete","target hit","target_hit","target achieved","approved","cleared","success"];
+  const breached = ["breached","breach","max loss","max_loss","drawdown","dd breach","violation","rule broken"];
+  const failed = ["failed","fail","terminated","rejected","closed"];
+
+  if (phase === "funded") {
+    if (has(breached) || has(failed)) return "BREACHED";
+    return "ACTIVE";
+  }
+  if (has(passed)) return "PASSED";
+  if (has(breached) || has(failed)) return "FAILED";
+  return "ACTIVE";
+}
+
 const styles = StyleSheet.create({
-  bg: {
+  container: {
     flex: 1,
-    alignItems: "center",
-    backgroundColor: "#F7F8FA",
-    paddingTop: 0,
+    backgroundColor: LIGHT_BLUE,
+    justifyContent: 'flex-start',
+    paddingBottom: 0,
   },
-  headerCurve: {
+  headerBg: {
     width: "100%",
-    paddingTop: 52,
-    paddingBottom: 40,
-    paddingHorizontal: 32,
-    borderBottomLeftRadius: 36,
-    borderBottomRightRadius: 36,
+    height: 120,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    justifyContent: "flex-end",
     alignItems: "flex-start",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#120FD8",
-        shadowOpacity: 0.09,
-        shadowOffset: { width: 0, height: 7 },
-        shadowRadius: 20,
-      },
-      android: { elevation: 6 },
-    }),
   },
-  greetingText: {
-    fontSize: 22,
-    fontWeight: "500",
-    color: "#F3F6FF",
-    letterSpacing: 0.2,
-    marginBottom: 4,
-    marginTop: 8,
-    opacity: 0.93,
+  flexGrow: {
+    flex: 1,
+    justifyContent: 'flex-start',
+    marginTop: 22,
+    zIndex: 1,
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+    zIndex: 2,
+  },
+  welcomeText: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: WHITE,
+    marginBottom: 2,
   },
   userName: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#fff",
-    letterSpacing: 1,
-    marginTop: 2,
+    fontSize: 38,
+    fontWeight: '700',
+    color: WHITE,
+    letterSpacing: 0.3,
   },
-  cardsContainer: {
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "flex-start",
+  quickActionsContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 10,
   },
   cardWrapper: {
-    width: "90%",
-    borderRadius: 22,
-    backgroundColor: "transparent",
+    marginBottom: 15,
+    borderRadius: 14,
     ...Platform.select({
       ios: {
-        shadowColor: "#120FD833",
-        shadowOpacity: 0.17,
-        shadowOffset: { width: 0, height: 7 },
-        shadowRadius: 18,
+        shadowColor: BRAND_BLUE,
+        shadowOpacity: 0.15,
+        shadowOffset: { width: 0, height: 3 },
+        shadowRadius: 10,
       },
-      android: { elevation: 8 },
+      android: {
+        elevation: 5,
+      },
     }),
   },
-  cardGradient: {
-    borderRadius: 22,
-    paddingVertical: 10,
-    width: "100%",
-    justifyContent: "center",
-  },
-  cardRow: {
+  actionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 22,
-    width: "100%",
-    minHeight: 78,
+    borderRadius: 14,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+    minHeight: 110,
   },
   iconCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 16,
-    backgroundColor: "#2320FA55",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#2540F6",
-        shadowOpacity: 0.22,
-        shadowOffset: { width: 0, height: 3 },
-        shadowRadius: 8,
-      },
-      android: { elevation: 2 },
-    }),
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 18,
   },
-  cardInfo: {
-    justifyContent: "center",
+  cardContent: {
     flex: 1,
-    minWidth: 0,
   },
   cardTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#fff",
-    marginBottom: 2,
-    letterSpacing: 0.2,
+    fontSize: 24,
+    fontWeight: '700',
+    color: WHITE,
+    marginBottom: 3,
   },
   cardSubtitle: {
-    fontSize: 13.5,
-    color: "#E3E6FA",
-    fontWeight: "600",
-    opacity: 0.95,
-    marginTop: 2,
-    letterSpacing: 0.01,
-    includeFontPadding: false,
-    textAlignVertical: "center",
-    flexShrink: 1,
-    maxWidth: "100%",
-  }
+    fontSize: 16,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.85)',
+  },
+  challengesSection: {
+    marginHorizontal: 16,
+    backgroundColor: OFF_WHITE,
+    borderRadius: 12,
+    padding: 18,
+    marginBottom: 10,
+    borderWidth: 2.5,
+    borderColor: DARK_BORDER,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOpacity: 0.09,
+        shadowOffset: { width: 0, height: 2 },
+        shadowRadius: 6,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
+  },
+  challengesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  challengesIcon: {
+    marginRight: 10,
+  },
+  challengesTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 10,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: WHITE,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginHorizontal: 1,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    minWidth: 0,
+  },
+  statLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: BRAND_BLUE,
+  },
+  marketSection: {
+    marginTop: 0,
+    flexGrow: 1,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1F2937',
+    marginBottom: 8,
+  },
+  marketRow: {
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 0,
+  },
+  marketCard: {
+    flex: 1,
+    backgroundColor: WHITE,
+    borderRadius: 16,
+    padding: 18,
+    justifyContent: 'space-between',
+    borderWidth: 1.5,
+    minHeight: 110,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOpacity: 0.07,
+        shadowOffset: { width: 0, height: 2 },
+        shadowRadius: 5,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  marketCardGreen: {
+    borderColor: GREEN,
+  },
+  marketCardRed: {
+    borderColor: RED,
+  },
+  marketTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  marketIconWrapper: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: `${GREEN}15`,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 7,
+  },
+  marketName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6B7280',
+    letterSpacing: 0.2,
+    flexDirection: "row",
+    alignItems: "center"
+  },
+  marketPrice: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1F2937',
+    marginBottom: 2,
+  },
+  marketChangeText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: GREEN,
+  },
+  marketChangeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    marginTop: 4,
+  },
 });
